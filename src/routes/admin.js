@@ -11,7 +11,7 @@ import {
   decrypt, decryptJson, encrypt, encryptJson, friendlyPassword, mask,
 } from '../lib/crypto.js';
 import { processLogo, processPlayerPhoto, describeImageError } from '../lib/images.js';
-import { auctionService } from '../auction/service.js';
+import { auctionService, fitOut } from '../auction/service.js';
 import { isOpenPhase } from '../auction/engine.js';
 import {
   getSettingsDoc, resolveSections, SECTION_CLEANERS, ValidationError,
@@ -346,6 +346,7 @@ function teamOut(t) {
     shortName: t.shortName,
     color: t.color,
     logoUrl: urlFor(t.logoKey),
+    logoFit: fitOut(t.logoFit),
     captainName: t.captainName,
     captainPhotoUrl: urlFor(t.captainPhotoKey),
     budget: t.budget,
@@ -377,6 +378,14 @@ function cleanTeam(b, partial = false) {
   }
   if (b.frozen !== undefined) out.frozen = !!b.frozen;
   if (b.order !== undefined) out.order = Number(b.order) || 0;
+  if (b.logoFit !== undefined) {
+    const f = b.logoFit || {};
+    const clamp = (v, lo, hi, d) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.round(Math.min(hi, Math.max(lo, n)) * 100) / 100 : d;
+    };
+    out.logoFit = { scale: clamp(f.scale, 0.3, 4, 1), x: clamp(f.x, -100, 100, 0), y: clamp(f.y, -100, 100, 0) };
+  }
   return out;
 }
 
@@ -424,6 +433,8 @@ async function saveTeamImage(req, res, field, folder) {
   const key = await putObject(`teams/${team._id}/${folder}-${img.hash}.webp`, img.main, 'image/webp');
   if (team[field] && team[field] !== key) await deleteObject(team[field]);
   team[field] = key;
+  // A new logo starts un-zoomed; old framing was for a different image.
+  if (field === 'logoKey') team.logoFit = { scale: 1, x: 0, y: 0 };
   await team.save();
   await auctionService.reload();
   return res.json(teamOut(team));
@@ -539,6 +550,9 @@ function playerOut(p) {
     tier: p.tier,
     year: p.year,
     basePrice: p.basePrice,
+    // What the auction will actually open at (own price, else tier price, else default).
+    effectiveBase: auctionService.engine?.basePriceFor(p) ?? null,
+    tierMatched: !!auctionService.engine?.tierOf(p),
     order: p.order,
     status: p.status,
     teamId: p.teamId ? String(p.teamId) : null,

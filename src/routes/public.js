@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { Media, Player, Team } from '../models.js';
-import { auctionService } from '../auction/service.js';
+import { auctionService, fitOut } from '../auction/service.js';
 import { urlFor } from '../integrations/storage.js';
 import { getSettingsDoc } from '../settings.js';
 import { decrypt, safeEqual } from '../lib/crypto.js';
@@ -33,9 +33,9 @@ router.get('/state', (req, res) => {
 
 /** Team list for the captain login screen. */
 router.get('/teams', h(async (req, res) => {
-  const teams = await Team.find({}, { name: 1, shortName: 1, color: 1, logoKey: 1, order: 1 }).sort({ order: 1, name: 1 }).lean();
+  const teams = await Team.find({}, { name: 1, shortName: 1, color: 1, logoKey: 1, logoFit: 1, order: 1 }).sort({ order: 1, name: 1 }).lean();
   res.json(teams.map((t) => ({
-    id: String(t._id), name: t.name, shortName: t.shortName, color: t.color, logoUrl: urlFor(t.logoKey),
+    id: String(t._id), name: t.name, shortName: t.shortName, color: t.color, logoUrl: urlFor(t.logoKey), logoFit: fitOut(t.logoFit),
   })));
 }));
 
@@ -61,7 +61,7 @@ router.get('/players/search', portalLimiter, portalGate, h(async (req, res) => {
   if (q.length < 2) return res.json([]);
   const players = await Player.find({ name: { $regex: escapeRegex(q), $options: 'i' }, status: { $ne: 'withheld' } })
     .limit(20).lean();
-  const teams = new Map((await Team.find({}, { name: 1, color: 1, logoKey: 1 }).lean()).map((t) => [String(t._id), t]));
+  const teams = new Map((await Team.find({}, { name: 1, color: 1, logoKey: 1, logoFit: 1 }).lean()).map((t) => [String(t._id), t]));
   res.json(players.map((p) => {
     const t = p.teamId ? teams.get(String(p.teamId)) : null;
     return {
@@ -72,7 +72,7 @@ router.get('/players/search', portalLimiter, portalGate, h(async (req, res) => {
       tier: p.tier,
       status: p.status,
       price: ['sold', 'retained'].includes(p.status) ? p.price : null,
-      team: t ? { id: String(t._id), name: t.name, color: t.color, logoUrl: urlFor(t.logoKey) } : null,
+      team: t ? { id: String(t._id), name: t.name, color: t.color, logoUrl: urlFor(t.logoKey), logoFit: fitOut(t.logoFit) } : null,
       thumbUrl: urlFor(p.thumbKey) || urlFor(p.photoKey),
     };
   }));

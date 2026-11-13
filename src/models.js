@@ -41,6 +41,12 @@ const TeamSchema = new Schema(
     shortName: { type: String, default: '', trim: true },
     color: { type: String, default: '#e11d48' },
     logoKey: { type: String, default: '' },
+    // Admin framing of the logo inside its square: zoom factor and offset in % of the box.
+    logoFit: {
+      scale: { type: Number, default: 1 },
+      x: { type: Number, default: 0 },
+      y: { type: Number, default: 0 },
+    },
     captainName: { type: String, default: '' },
     captainPhotoKey: { type: String, default: '' },
     budget: { type: Number, default: null }, // null = use the global team budget

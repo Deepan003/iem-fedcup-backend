@@ -94,8 +94,15 @@ export class AuctionEngine {
 
   basePriceFor(player) {
     if (Number.isInteger(player.basePrice) && player.basePrice > 0) return player.basePrice;
-    const tier = this.settings.tiers.find((t) => t.name === player.tier);
+    const tier = this.tierOf(player);
     return tier ? tier.basePrice : this.settings.defaultBasePrice;
+  }
+
+  /** The configured tier for a player; matching ignores case and extra spaces ("gold " = "Gold"). */
+  tierOf(player) {
+    const key = String(player?.tier || '').trim().toLowerCase();
+    if (!key) return null;
+    return this.settings.tiers.find((t) => String(t.name).trim().toLowerCase() === key) || null;
   }
 
   /**

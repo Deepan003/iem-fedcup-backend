@@ -255,3 +255,14 @@ test('unsold round and restart recovery', () => {
   assert.equal(restored.state.lot.seq, lot.seq);
   assert.equal(restored.state.lot.remainingMs, 15000);
 });
+
+test('base price comes from the tier (case/space-insensitive), own price wins, else default', () => {
+  const { engine } = setup();
+  assert.equal(engine.basePriceFor({ tier: 'Gold' }), 50);
+  assert.equal(engine.basePriceFor({ tier: ' gold ' }), 50);
+  assert.equal(engine.basePriceFor({ tier: 'SILVER' }), 20);
+  assert.equal(engine.basePriceFor({ tier: 'Platinum' }), 10);
+  assert.equal(engine.basePriceFor({ tier: '' }), 10);
+  assert.equal(engine.basePriceFor({ tier: 'Gold', basePrice: 75 }), 75);
+  assert.equal(engine.tierOf({ tier: 'gold' })?.name, 'Gold');
+});

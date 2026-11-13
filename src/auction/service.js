@@ -58,6 +58,15 @@ function playerToEngine(p) {
   };
 }
 
+/** Logo framing for clients: null when untouched so payloads stay small. */
+export function fitOut(f) {
+  if (!f) return null;
+  const scale = Number(f.scale) || 1;
+  const x = Number(f.x) || 0;
+  const y = Number(f.y) || 0;
+  return scale === 1 && x === 0 && y === 0 ? null : { scale, x, y };
+}
+
 function teamToEngine(t, sections) {
   return {
     id: String(t._id),
@@ -65,6 +74,7 @@ function teamToEngine(t, sections) {
     shortName: t.shortName || t.name.slice(0, 3).toUpperCase(),
     color: t.color,
     logoKey: t.logoKey || '',
+    logoFit: fitOut(t.logoFit),
     captainName: t.captainName || '',
     captainPhotoKey: t.captainPhotoKey || '',
     budget: t.budget ?? sections.auction.teamBudget,
@@ -343,12 +353,12 @@ export class AuctionService {
 
   publicPlayer(p) {
     if (!p) return null;
-    const tier = this.sections.auction.tiers.find((t) => t.name === p.tier);
+    const tier = this.engine.tierOf(p);
     return {
       id: p.id,
       name: p.name,
       position: p.position,
-      tier: p.tier,
+      tier: tier?.name || p.tier,
       department: p.department,
       isCaptain: !!p.isCaptain,
       tierColor: tier?.color || null,
@@ -412,6 +422,7 @@ export class AuctionService {
           shortName: t.shortName,
           color: t.color,
           logoUrl: urlFor(t.logoKey),
+          logoFit: t.logoFit,
           captainName: t.captainName,
           captainPhotoUrl: urlFor(t.captainPhotoKey),
           frozen: t.frozen,
@@ -463,7 +474,8 @@ export class AuctionService {
       const R = stats.records;
       if (!R.overall || p.price > R.overall.price) R.overall = rec;
       if (!R.byPosition[p.position] || p.price > R.byPosition[p.position].price) R.byPosition[p.position] = rec;
-      if (p.tier && (!R.byTier[p.tier] || p.price > R.byTier[p.tier].price)) R.byTier[p.tier] = rec;
+      const tn = this.engine.tierOf(p)?.name || p.tier;
+      if (tn && (!R.byTier[tn] || p.price > R.byTier[tn].price)) R.byTier[tn] = rec;
     }
 
     const state = {
