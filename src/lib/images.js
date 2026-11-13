@@ -24,12 +24,15 @@ export async function processPlayerPhoto(input) {
   return { main, thumb, hash: hash(main) };
 }
 
-/** Team logo → 512px square, transparent background preserved. */
+/**
+ * Team logo kept whole: original shape, never cropped or padded, transparency preserved.
+ * Only shrunk if larger than 1024px on its longest side.
+ */
 export async function processLogo(input) {
   const out = await sharp(input, { failOn: 'none' })
     .rotate()
-    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .webp({ quality: 90 })
+    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 92, alphaQuality: 100 })
     .toBuffer();
   return { main: out, hash: hash(out) };
 }
