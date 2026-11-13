@@ -78,6 +78,10 @@ function teamToEngine(t, sections) {
     captainName: t.captainName || '',
     captainPhotoKey: t.captainPhotoKey || '',
     budget: t.budget ?? sections.auction.teamBudget,
+    penalty: (t.penalties || []).reduce((s, p) => s + (p.amount || 0), 0),
+    penalties: (t.penalties || []).map((p) => ({
+      id: String(p._id), amount: p.amount, remark: p.remark || '', at: p.at ? new Date(p.at).getTime() : null,
+    })),
     frozen: !!t.frozen,
     order: t.order ?? 0,
   };
@@ -430,7 +434,7 @@ export class AuctionService {
         };
         if (own || showPurses) {
           Object.assign(out, {
-            budget: t.budget, purse: f.purse, spent: f.spent, slotsLeft: f.slotsLeft, byPosition: f.byPosition, maxBid: f.maxBid,
+            budget: t.budget, purse: f.purse, spent: f.spent, penalty: f.penalty, penalties: t.penalties, slotsLeft: f.slotsLeft, byPosition: f.byPosition, maxBid: f.maxBid,
           });
         }
         if (own || showSquads) {

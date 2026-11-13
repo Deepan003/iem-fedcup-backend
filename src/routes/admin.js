@@ -350,6 +350,9 @@ function teamOut(t) {
     captainName: t.captainName,
     captainPhotoUrl: urlFor(t.captainPhotoKey),
     budget: t.budget,
+    penalties: (t.penalties || []).map((p) => ({
+      id: String(p._id), amount: p.amount, remark: p.remark || '', at: p.at,
+    })),
     frozen: t.frozen,
     order: t.order,
     hasPassword: !!t.captainPasswordEnc,
@@ -439,6 +442,31 @@ async function saveTeamImage(req, res, field, folder) {
   await auctionService.reload();
   return res.json(teamOut(team));
 }
+
+/** Penalty: a whole-number deduction from the team's purse, with a reason. */
+router.post('/teams/:id/penalties', h(async (req, res) => {
+  const amount = Number(req.body?.amount);
+  const remark = String(req.body?.remark || '').trim().slice(0, 200);
+  if (!Number.isInteger(amount) || amount < 1) throw new ValidationError('Penalty must be a whole number above 0');
+  if (!remark) throw new ValidationError('Add a remark: the reason for the penalty');
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const team = await Team.findByIdAndUpdate(req.params.id, { $push: { penalties: { amount, remark, at: new Date() } } }, { returnDocument: 'after' });
+  if (!team) return res.status(404).json({ error: 'NOT_FOUND' });
+  await AuditLog.create({ type: 'penalty', actor: 'admin', data: { teamId: String(team._id), amount, remark } });
+  await auctionService.reload();
+  return res.json(teamOut(team));
+}));
+
+router.delete('/teams/:id/penalties/:pid', h(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(req.params.pid)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const before = await Team.findById(req.params.id).lean();
+  const pen = before?.penalties?.find((p) => String(p._id) === req.params.pid);
+  if (!pen) return res.status(404).json({ error: 'NOT_FOUND' });
+  const team = await Team.findByIdAndUpdate(req.params.id, { $pull: { penalties: { _id: pen._id } } }, { returnDocument: 'after' });
+  await AuditLog.create({ type: 'penalty-removed', actor: 'admin', data: { teamId: req.params.id, amount: pen.amount, remark: pen.remark } });
+  await auctionService.reload();
+  return res.json(teamOut(team));
+}));
 
 router.post('/teams/:id/logo', upload.single('file'), h((req, res) => saveTeamImage(req, res, 'logoKey', 'logo')));
 router.post('/teams/:id/captain-photo', upload.single('file'), h((req, res) => saveTeamImage(req, res, 'captainPhotoKey', 'captain')));
@@ -717,13 +745,16 @@ router.get('/export.xlsx', h(async (req, res) => {
   };
   const role = (p) => (p.isCaptain ? 'Captain' : p.status === 'retained' ? 'Retained' : 'Bought');
   const sum = wb.addWorksheet('Summary');
-  sum.columns = [{ header: 'Team', key: 'team', width: 26 }, { header: 'Captain', key: 'cap', width: 22 }, { header: 'Players', key: 'n', width: 10 }, { header: 'Budget', key: 'budget', width: 12 }, { header: 'Spent', key: 'spent', width: 12 }, { header: 'Purse left', key: 'left', width: 12 }];
+  sum.columns = [{ header: 'Team', key: 'team', width: 26 }, { header: 'Captain', key: 'cap', width: 22 }, { header: 'Players', key: 'n', width: 10 }, { header: 'Budget', key: 'budget', width: 12 }, { header: 'Spent', key: 'spent', width: 12 }, { header: 'Penalties', key: 'pen', width: 12 }, { header: 'Purse left', key: 'left', width: 12 }];
   head(sum);
   for (const t of teams) {
     const squad = players.filter((p) => String(p.teamId) === String(t._id) && ['sold', 'retained'].includes(p.status));
     const spent = squad.reduce((s, p) => s + (p.price || 0), 0);
     const budget = t.budget ?? auction.teamBudget;
-    sum.addRow({ team: t.name, cap: t.captainName, n: squad.length, budget, spent, left: budget - spent });
+    const pen = (t.penalties || []).reduce((s, p) => s + (p.amount || 0), 0);
+    sum.addRow({
+      team: t.name, cap: t.captainName, n: squad.length, budget, spent, pen, left: budget - spent - pen,
+    });
     const ws = wb.addWorksheet(t.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
     ws.columns = [{ header: '#', key: 'i', width: 5 }, { header: 'Name', key: 'name', width: 26 }, { header: 'Position', key: 'pos', width: 13 }, { header: 'Department', key: 'dept', width: 16 }, { header: 'Year', key: 'year', width: 10 }, { header: 'Role', key: 'role', width: 11 }, { header: 'Price', key: 'price', width: 10 }];
     head(ws, `FF${(t.color || '#0b0b0c').replace('#', '').toUpperCase()}`);

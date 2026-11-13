@@ -266,3 +266,15 @@ test('base price comes from the tier (case/space-insensitive), own price wins, e
   assert.equal(engine.basePriceFor({ tier: 'Gold', basePrice: 75 }), 75);
   assert.equal(engine.tierOf({ tier: 'gold' })?.name, 'Gold');
 });
+
+test('penalties come off the purse and cap the max bid', () => {
+  const { engine } = setup();
+  engine.teams.get('A').penalty = 160; // budget 200 → 40 left
+  const f = engine.finance('A');
+  assert.equal(f.penalty, 160);
+  assert.equal(f.purse, 40);
+  assert.ok(f.maxBid <= 40);
+  const lot = openLot(engine, 'd1'); // Gold, base 50 > 40 left
+  assert.equal(code(() => engine.bid({ teamId: 'A', amount: lot.base, lotSeq: lot.seq })), 'OVER_BUDGET');
+  engine.bid({ teamId: 'B', amount: lot.base, lotSeq: lot.seq });
+});

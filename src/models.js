@@ -50,6 +50,11 @@ const TeamSchema = new Schema(
     captainName: { type: String, default: '' },
     captainPhotoKey: { type: String, default: '' },
     budget: { type: Number, default: null }, // null = use the global team budget
+    // Disciplinary deductions from the purse, each with a reason.
+    penalties: {
+      type: [{ amount: { type: Number, required: true }, remark: { type: String, default: '' }, at: { type: Date, default: Date.now } }],
+      default: [],
+    },
     frozen: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
     captainPasswordEnc: { type: String, default: '' },

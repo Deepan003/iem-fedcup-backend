@@ -117,7 +117,8 @@ export class AuctionEngine {
     const byPosition = {};
     for (const p of squad) byPosition[p.position] = (byPosition[p.position] || 0) + 1;
 
-    const purse = team.budget - spent;
+    const penalty = team.penalty || 0;
+    const purse = team.budget - spent - penalty;
     const count = squad.length;
     const slotsLeft = Math.max(0, s.maxSquadSize - count);
 
@@ -131,7 +132,9 @@ export class AuctionEngine {
     const mustBuyAfter = Math.max(s.minSquadSize - (count + 1), positionNeedAfter, 0);
     const maxBid = slotsLeft > 0 ? Math.max(0, purse - mustBuyAfter * s.reservePerSlot) : 0;
 
-    return { purse, spent, count, slotsLeft, byPosition, maxBid, mustBuyAfter };
+    return {
+      purse, spent, penalty, count, slotsLeft, byPosition, maxBid, mustBuyAfter,
+    };
   }
 
   /** Returns an error code if `teamId` may not buy `player` for `amount`, otherwise null. */
