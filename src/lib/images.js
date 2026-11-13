@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import sharp from 'sharp';
-import convertHeic from 'heic-convert';
+import { Worker } from 'node:worker_threads';
 
 sharp.cache(false);
 sharp.concurrency(2);
@@ -18,12 +18,29 @@ const brandOf = (buf) => (buf?.length >= 12 && buf.toString('ascii', 4, 8) === '
 export const isHeic = (buf) => HEIC_BRANDS.has(brandOf(buf));
 const maybeHeif = (buf) => HEIF_BRANDS.has(brandOf(buf));
 
+/** Converts in a worker thread so the server never freezes while a big photo decodes. */
+function convertInWorker(buf) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const finish = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); fn(v); } };
+    const w = new Worker(new URL('./heic-worker.js', import.meta.url), {
+      workerData: buf,
+      resourceLimits: { maxOldGenerationSizeMb: 320 },
+    });
+    timer = setTimeout(() => { w.terminate(); finish(reject, new Error('HEIC conversion timed out')); }, 180_000);
+    w.once('message', (m) => { finish(resolve, Buffer.from(m)); w.terminate(); });
+    w.once('error', (e) => finish(reject, e));
+    w.once('exit', (code) => { if (code !== 0) finish(reject, new Error('HEIC converter stopped (photo too large for this server)')); });
+  });
+}
+
 // One conversion at a time: decoding a 12 MP HEIC in WebAssembly uses a lot of memory.
 let heicQueue = Promise.resolve();
 function heicToJpeg(buf) {
-  const job = heicQueue.then(() => convertHeic({ buffer: buf, format: 'JPEG', quality: 0.92 }));
+  const job = heicQueue.then(() => convertInWorker(buf));
   heicQueue = job.catch(() => {});
-  return job.then((out) => Buffer.from(out));
+  return job;
 }
 
 /** Runs `fn` on the image; HEIC is converted first, and HEIF-looking files get a second try. */

@@ -91,6 +91,7 @@ export class AuctionService {
     const { sections, data } = await this.#load();
     const saved = await AuctionState.findById('main').lean();
     this.sections = sections;
+    this.dataV = Date.now(); // bumps whenever teams/players/settings/photos change
     this.engine = new AuctionEngine({ ...data, state: saved?.state });
     this.engine.recoverAfterRestart();
     this.engine.drainDirty();
@@ -136,6 +137,7 @@ export class AuctionService {
       const { sections, data } = await this.#load();
       if (version === this.engine.state.version) {
         this.sections = sections;
+        this.dataV = Date.now();
         this.engine.setData(data);
         this.#schedule();
         this.broadcastFull();
@@ -450,6 +452,7 @@ export class AuctionService {
 
     const state = {
       v: st.version,
+      dataV: this.dataV,
       serverNow: Date.now(),
       status: st.status,
       paused: st.paused,
