@@ -3,7 +3,9 @@ import sharp from 'sharp';
 import { Worker } from 'node:worker_threads';
 
 sharp.cache(false);
-sharp.concurrency(2);
+sharp.concurrency(1);
+// Never open anything bigger than ~50 MP (protects memory on small servers).
+const SHARP_OPTS = { failOn: 'none', limitInputPixels: 50_000_000, sequentialRead: true };
 
 const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex').slice(0, 10);
 
@@ -63,7 +65,7 @@ async function withDecodable(input, fn) {
  */
 export function processPlayerPhoto(input) {
   return withDecodable(input, async (buf) => {
-    const base = sharp(buf, { failOn: 'none' }).rotate();
+    const base = sharp(buf, SHARP_OPTS).rotate();
     const main = await base.clone()
       .resize(720, 900, { fit: 'cover', position: sharp.strategy.attention })
       .webp({ quality: 80 })
@@ -82,7 +84,7 @@ export function processPlayerPhoto(input) {
  */
 export function processLogo(input) {
   return withDecodable(input, async (buf) => {
-    const out = await sharp(buf, { failOn: 'none' })
+    const out = await sharp(buf, SHARP_OPTS)
       .rotate()
       .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 92, alphaQuality: 100 })

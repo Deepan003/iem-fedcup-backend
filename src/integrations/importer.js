@@ -212,8 +212,8 @@ export function startPhotoSync({
         onProgress?.(job);
       }
     };
-    // 3 at a time keeps memory safe on small (512 MB) servers.
-    await Promise.all([worker(), worker(), worker()]);
+    // One at a time keeps memory low on a small (512 MB) server.
+    await worker();
   })()
     .catch((err) => {
       job.error = err.message;

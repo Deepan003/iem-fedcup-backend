@@ -91,10 +91,10 @@ router.get('/players', portalLimiter, portalGate, (req, res) => {
 
 /*
  * Keys contain a content hash, so a stored image never changes. Keep recently served images in
- * memory (≈64 MB cap, oldest evicted first) so hundreds of viewers loading the same player photo
+ * memory (≈24 MB cap, oldest evicted first) so hundreds of viewers loading the same player photo
  * cause one database read, not hundreds. Concurrent misses for the same key share one query.
  */
-const MEDIA_CACHE_MAX = 64 * 1024 * 1024;
+const MEDIA_CACHE_MAX = 24 * 1024 * 1024;
 const mediaCache = new Map(); // key -> { type, body }
 const mediaPending = new Map(); // key -> Promise
 let mediaCacheBytes = 0;

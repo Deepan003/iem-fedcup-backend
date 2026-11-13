@@ -73,9 +73,9 @@ export async function downloadDriveFile(client, fileId) {
     const { mimeType = '', name = '', thumbnailLink } = meta.data;
     const size = Number(meta.data.size) || 0;
     const isHeif = /heic|heif/i.test(mimeType) || /\.(heic|heif)$/i.test(name);
-    // iPhone HEIC and very large photos: use Google's own rendered JPEG preview (1600px).
-    // Decoding a 48 MP HEIC ourselves needs more memory than a small server has.
-    if (thumbnailLink && (isHeif || size > 15 * 1024 * 1024)) {
+    // Always prefer Google's rendered 1600px JPEG preview: a few hundred KB instead of a 5-20 MB
+    // original, and no HEIC decoding. Keeps memory low on a 512 MB server.
+    if (thumbnailLink) {
       const url = /=s\d+$/.test(thumbnailLink) ? thumbnailLink.replace(/=s\d+$/, '=s1600') : `${thumbnailLink}=s1600`;
       try {
         const th = await client.request({ url, responseType: 'arraybuffer' });
