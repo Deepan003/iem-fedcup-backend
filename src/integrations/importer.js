@@ -143,11 +143,49 @@ let currentJob = null;
 
 export const photoJobStatus = () => currentJob;
 
+/** Downloads one player's Drive photo (HEIC is converted automatically) and stores it. */
+async function syncOne(p, googleClient) {
+  try {
+    const id = driveFileId(p.photoSource);
+    if (!id) throw new Error('Not a Google Drive link');
+    const file = await downloadDriveFile(googleClient, id);
+    const img = await processPlayerPhoto(file.buffer);
+    const mainKey = await putObject(`players/${p._id}/${img.hash}.webp`, img.main, 'image/webp');
+    const thumbKey = await putObject(`players/${p._id}/${img.hash}-thumb.webp`, img.thumb, 'image/webp');
+    if (p.photoKey && p.photoKey !== mainKey) await deleteObject(p.photoKey);
+    if (p.thumbKey && p.thumbKey !== thumbKey) await deleteObject(p.thumbKey);
+    await Player.updateOne({ _id: p._id }, {
+      $set: {
+        photoKey: mainKey, thumbKey, photoSyncedFrom: p.photoSource, photoError: '',
+      },
+    });
+    return { ok: true };
+  } catch (err) {
+    const reason = err?.response?.status === 404 || err?.response?.status === 403
+      ? 'No access to this file. Share the photo folder with the service account.'
+      : describeImageError(err);
+    await Player.updateOne({ _id: p._id }, { $set: { photoError: reason } });
+    return { ok: false, reason };
+  }
+}
+
+/** Retry a single player's photo from its Drive link. */
+export async function retryPlayerPhoto(playerId, googleClient) {
+  const p = await Player.findById(playerId).lean();
+  if (!p) throw new Error('Player not found');
+  if (!p.photoSource) throw new Error('This player has no photo link in the sheet. Upload a photo instead.');
+  return syncOne(p, googleClient);
+}
+
 /**
- * Downloads every player's Drive photo, converts it to WebP and stores it.
+ * Downloads players' Drive photos, converts them to WebP and stores them.
+ * Default: only players without a photo (or whose link changed) — so it also resumes an
+ * interrupted sync. `onlyFailed` retries just the ones that errored; `force` redoes everything.
  * Runs in the background; progress is reported through `onProgress`.
  */
-export function startPhotoSync({ googleClient, force = false, onProgress }) {
+export function startPhotoSync({
+  googleClient, force = false, onlyFailed = false, onProgress,
+}) {
   if (currentJob?.running) throw new Error('A photo sync is already running');
   const job = {
     running: true, total: 0, done: 0, ok: 0, failed: [], skipped: 0, startedAt: Date.now(),
@@ -156,7 +194,10 @@ export function startPhotoSync({ googleClient, force = false, onProgress }) {
 
   (async () => {
     const players = await Player.find({ photoSource: { $ne: '' } }).lean();
-    const todo = players.filter((p) => force || !p.photoKey || p.photoSyncedFrom !== p.photoSource);
+    const todo = players.filter((p) => {
+      if (onlyFailed) return !!p.photoError;
+      return force || !p.photoKey || p.photoSyncedFrom !== p.photoSource;
+    });
     job.total = todo.length;
     job.skipped = players.length - todo.length;
     onProgress?.(job);
@@ -164,33 +205,15 @@ export function startPhotoSync({ googleClient, force = false, onProgress }) {
     const worker = async () => {
       while (todo.length) {
         const p = todo.shift();
-        try {
-          const id = driveFileId(p.photoSource);
-          if (!id) throw new Error('Not a Google Drive link');
-          const file = await downloadDriveFile(googleClient, id);
-          const img = await processPlayerPhoto(file.buffer);
-          const mainKey = await putObject(`players/${p._id}/${img.hash}.webp`, img.main, 'image/webp');
-          const thumbKey = await putObject(`players/${p._id}/${img.hash}-thumb.webp`, img.thumb, 'image/webp');
-          if (p.photoKey && p.photoKey !== mainKey) await deleteObject(p.photoKey);
-          if (p.thumbKey && p.thumbKey !== thumbKey) await deleteObject(p.thumbKey);
-          await Player.updateOne({ _id: p._id }, {
-            $set: {
-              photoKey: mainKey, thumbKey, photoSyncedFrom: p.photoSource, photoError: '',
-            },
-          });
-          job.ok += 1;
-        } catch (err) {
-          const reason = err?.response?.status === 404 || err?.response?.status === 403
-            ? 'No access to this file. Share the photo folder with the service account.'
-            : describeImageError(err);
-          await Player.updateOne({ _id: p._id }, { $set: { photoError: reason } });
-          job.failed.push({ playerId: String(p._id), name: p.name, reason });
-        }
+        const r = await syncOne(p, googleClient);
+        if (r.ok) job.ok += 1;
+        else job.failed.push({ playerId: String(p._id), name: p.name, reason: r.reason });
         job.done += 1;
         onProgress?.(job);
       }
     };
-    await Promise.all([worker(), worker(), worker(), worker()]);
+    // 3 at a time keeps memory safe on small (512 MB) servers.
+    await Promise.all([worker(), worker(), worker()]);
   })()
     .catch((err) => {
       job.error = err.message;

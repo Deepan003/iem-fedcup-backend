@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import multer from 'multer';
 import {
-  AuditLog, Bid, Player, Team, POSITIONS,
+  AuditLog, Bid, Media, Player, Team, POSITIONS,
 } from '../models.js';
 import { requireAdmin, signToken } from '../lib/auth.js';
 import {
@@ -23,7 +23,7 @@ import {
   configureStorage, deleteObject, isCompleteR2, putObject, storageMode, testR2, urlFor,
 } from '../integrations/storage.js';
 import {
-  parseRows, previewImport, commitImport, startPhotoSync, photoJobStatus,
+  parseRows, previewImport, commitImport, startPhotoSync, photoJobStatus, retryPlayerPhoto,
 } from '../integrations/importer.js';
 
 const router = Router();
@@ -220,10 +220,44 @@ router.post('/import/commit', h(async (req, res) => {
     const onBlock = await Player.findById(lot.playerId, { sheetKey: 1 }).lean();
     if (onBlock?.sheetKey) skipKeys.push(onBlock.sheetKey);
   }
-  const result = await commitImport(rows, { skipKeys });
+  const preview = await previewImport(rows);
+  const result = {
+    ...(await commitImport(rows, { skipKeys })),
+    total: rows.length,
+    unchanged: preview.unchanged,
+    skippedOnBlock: skipKeys.length,
+  };
   await AuditLog.create({ type: 'import', actor: 'admin', data: result });
   await auctionService.reload();
   res.json(result);
+}));
+
+/** Import + photo status for the admin panel: counts, last runs, and how photos stand. */
+router.get('/import/status', h(async (req, res) => {
+  const [total, fromSheet, withLink, withPhoto, failed, lastImport, lastPhotos] = await Promise.all([
+    Player.countDocuments(),
+    Player.countDocuments({ sheetKey: { $exists: true, $ne: null } }),
+    Player.countDocuments({ photoSource: { $ne: '' } }),
+    Player.countDocuments({ photoKey: { $ne: '' } }),
+    Player.countDocuments({ photoError: { $ne: '' } }),
+    AuditLog.findOne({ type: 'import' }).sort({ at: -1 }).lean(),
+    AuditLog.findOne({ type: 'photos' }).sort({ at: -1 }).lean(),
+  ]);
+  const job = photoJobStatus();
+  res.json({
+    players: { total, fromSheet },
+    lastImport: lastImport ? { at: lastImport.at, ...lastImport.data } : null,
+    photos: {
+      total,
+      withPhoto,
+      withLink,
+      failed,
+      waiting: Math.max(0, withLink - withPhoto - failed),
+      noLink: total - withLink,
+      running: !!job?.running,
+      lastSync: lastPhotos ? { at: lastPhotos.at, ...lastPhotos.data } : null,
+    },
+  });
 }));
 
 router.get('/import/photos', (req, res) => res.json(photoJobStatus()));
@@ -235,15 +269,72 @@ router.post('/import/photos', h(async (req, res) => {
   const job = startPhotoSync({
     googleClient: g?.client || null,
     force: !!req.body?.force,
+    onlyFailed: !!req.body?.onlyFailed,
     onProgress: (j) => {
       const now = Date.now();
       if (j.running && now - lastEmit < 400) return;
       lastEmit = now;
       auctionService.io?.to('admin').emit('job', { kind: 'photos', ...j });
-      if (!j.running) auctionService.reload().catch((err) => console.error('reload after photos', err));
+      if (!j.running) {
+        auctionService.reload().catch((err) => console.error('reload after photos', err));
+        AuditLog.create({ type: 'photos', actor: 'admin', data: { total: j.total, ok: j.ok, failed: j.failed.length } }).catch(() => {});
+      }
     },
   });
   res.status(202).json(job);
+}));
+
+/** Retry one player's photo from its Drive link (e.g. after an error). */
+router.post('/players/:id/photo/retry', h(async (req, res) => {
+  const doc = await getSettingsDoc();
+  const g = loadGoogle(doc);
+  let result;
+  try {
+    result = await retryPlayerPhoto(req.params.id, g?.client || null);
+  } catch (err) {
+    throw new ValidationError(err.message);
+  }
+  if (result.ok) await auctionService.reload();
+  return res.json(result);
+}));
+
+/* -------------------------------- storage --------------------------------- */
+
+const FREE_TIER_BYTES = 512 * 1024 * 1024; // MongoDB Atlas M0
+
+/** How full the database is: whole cluster vs the free 512 MB, with a breakdown. */
+router.get('/storage', h(async (req, res) => {
+  const db = mongoose.connection.db;
+  const own = await db.stats();
+  const ownBytes = (own.dataSize || 0) + (own.indexSize || 0);
+  const [media] = await Media.aggregate([{ $group: { _id: null, bytes: { $sum: '$size' }, count: { $sum: 1 } } }]);
+
+  const databases = [];
+  let totalBytes = ownBytes;
+  try {
+    const { databases: list } = await db.admin().listDatabases();
+    totalBytes = 0;
+    for (const d of list) {
+      if (['admin', 'local', 'config'].includes(d.name)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const s = await mongoose.connection.client.db(d.name).stats();
+      const bytes = (s.dataSize || 0) + (s.indexSize || 0);
+      totalBytes += bytes;
+      databases.push({ name: d.name, bytes, current: d.name === db.databaseName });
+    }
+  } catch {
+    databases.push({ name: db.databaseName, bytes: ownBytes, current: true });
+  }
+  databases.sort((a, b) => b.bytes - a.bytes);
+
+  res.json({
+    limitBytes: FREE_TIER_BYTES,
+    totalBytes,
+    percent: Math.round((totalBytes / FREE_TIER_BYTES) * 1000) / 10,
+    auction: { bytes: ownBytes, database: db.databaseName },
+    images: { bytes: media?.bytes || 0, count: media?.count || 0, storedIn: storageMode() },
+    databases,
+  });
 }));
 
 /* ---------------------------------- teams --------------------------------- */
