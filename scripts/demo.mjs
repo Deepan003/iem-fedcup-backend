@@ -193,7 +193,11 @@ function runBot(team, token) {
 /* --------------------------------- main ---------------------------------- */
 
 try {
-  const { token: adminToken } = await api('POST', '/auth/admin', { password: ADMIN_PASSWORD });
+  let { token: adminToken, mustChangePassword } = await api('POST', '/auth/admin', { password: ADMIN_PASSWORD });
+  if (mustChangePassword) {
+    // Save the demo password for real so the admin panel does not ask to change it.
+    ({ token: adminToken } = await api('POST', '/admin/password', { next: ADMIN_PASSWORD }, adminToken));
+  }
   let teams = await api('GET', '/admin/teams', null, adminToken);
   if (!teams.length) {
     await seed(adminToken);
