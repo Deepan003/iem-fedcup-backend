@@ -68,9 +68,27 @@ export async function downloadDriveFile(client, fileId) {
   if (client) {
     const meta = await client.request({
       url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
-      params: { fields: 'name,mimeType,size', supportsAllDrives: true },
+      params: { fields: 'name,mimeType,size,thumbnailLink', supportsAllDrives: true },
     });
-    if (Number(meta.data.size) > MAX_BYTES) throw new Error('File is larger than 30 MB');
+    const { mimeType = '', name = '', thumbnailLink } = meta.data;
+    const size = Number(meta.data.size) || 0;
+    const isHeif = /heic|heif/i.test(mimeType) || /\.(heic|heif)$/i.test(name);
+    // iPhone HEIC and very large photos: use Google's own rendered JPEG preview (1600px).
+    // Decoding a 48 MP HEIC ourselves needs more memory than a small server has.
+    if (thumbnailLink && (isHeif || size > 15 * 1024 * 1024)) {
+      const url = /=s\d+$/.test(thumbnailLink) ? thumbnailLink.replace(/=s\d+$/, '=s1600') : `${thumbnailLink}=s1600`;
+      try {
+        const th = await client.request({ url, responseType: 'arraybuffer' });
+        const buf = Buffer.from(th.data);
+        if (buf.length > 1000) return { buffer: buf, mimeType: 'image/jpeg', name };
+      } catch {
+        // fall through to the original file
+      }
+    }
+    if (isHeif && size > 8 * 1024 * 1024) {
+      throw new Error('This iPhone photo is too large to convert on the server and Google has no preview yet. Upload a JPG/PNG manually.');
+    }
+    if (size > MAX_BYTES) throw new Error('File is larger than 30 MB');
     const res = await client.request({
       url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
       params: { alt: 'media', supportsAllDrives: true },
