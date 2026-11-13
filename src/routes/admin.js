@@ -458,36 +458,71 @@ router.get('/teams/:id/password', h(async (req, res) => {
 router.post('/teams/:id/retained', h(async (req, res) => {
   const team = await Team.findById(req.params.id).lean();
   if (!team) return res.status(404).json({ error: 'NOT_FOUND' });
-  const price = Number(req.body?.price);
+  const b = req.body || {};
+  const isCaptain = !!b.isCaptain;
+  const price = isCaptain ? 0 : Number(b.price);
   if (!Number.isInteger(price) || price < 0) throw new ValidationError('Retention price must be a whole number');
+  const extra = { department: String(b.department || '').trim().slice(0, 60), isCaptain };
   let player;
-  if (req.body?.playerId) {
-    if (!mongoose.isValidObjectId(req.body.playerId)) throw new ValidationError('Unknown player');
-    if (auctionService.isOnBlock(req.body.playerId)) throw new ValidationError('That player is on the block right now');
+  if (b.playerId) {
+    if (!mongoose.isValidObjectId(b.playerId)) throw new ValidationError('Unknown player');
+    if (auctionService.isOnBlock(b.playerId)) throw new ValidationError('That player is on the block right now');
+    const set = { status: 'retained', teamId: team._id, price, isCaptain };
+    if (extra.department) set.department = extra.department;
     player = await Player.findOneAndUpdate(
-      { _id: req.body.playerId, status: { $in: ['available', 'unsold', 'withheld'] } },
-      { $set: { status: 'retained', teamId: team._id, price } },
+      { _id: b.playerId, status: { $in: ['available', 'unsold', 'withheld'] } },
+      { $set: set },
       { returnDocument: 'after' },
     );
     if (!player) throw new ValidationError('Player not found or already sold/retained');
   } else {
-    const position = POSITIONS.includes(req.body?.position) ? req.body.position : null;
-    const name = String(req.body?.name || '').trim();
+    const position = POSITIONS.includes(b.position) ? b.position : null;
+    const name = String(b.name || '').trim();
     if (!name || !position) throw new ValidationError('Name and position are required');
     player = await Player.create({
-      name, position, year: String(req.body?.year || ''), status: 'retained', teamId: team._id, price,
+      name, position, year: String(b.year || ''), status: 'retained', teamId: team._id, price, ...extra,
     });
   }
-  await AuditLog.create({ type: 'retained', actor: 'admin', data: { teamId: String(team._id), playerId: String(player._id), price } });
+  if (isCaptain) await setCaptain(team._id, player);
+  await AuditLog.create({ type: 'retained', actor: 'admin', data: { teamId: String(team._id), playerId: String(player._id), price, isCaptain } });
   await auctionService.reload();
   return res.status(201).json({ ok: true, playerId: String(player._id) });
+}));
+
+/** One captain per team; the captain's name is mirrored onto the team. */
+async function setCaptain(teamId, player) {
+  await Player.updateMany({ teamId, _id: { $ne: player._id }, isCaptain: true }, { $set: { isCaptain: false } });
+  await Team.updateOne({ _id: teamId }, { $set: { captainName: player.name } });
+}
+
+/** Edit a retained player or captain; the team purse updates automatically. */
+router.put('/teams/:id/retained/:playerId', h(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.playerId)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const b = req.body || {};
+  const set = {};
+  if (b.name !== undefined) { set.name = String(b.name).trim().slice(0, 80); if (!set.name) throw new ValidationError('Name is required'); }
+  if (b.position !== undefined) { if (!POSITIONS.includes(b.position)) throw new ValidationError('Unknown position'); set.position = b.position; }
+  if (b.department !== undefined) set.department = String(b.department).trim().slice(0, 60);
+  if (b.year !== undefined) set.year = String(b.year).trim().slice(0, 30);
+  if (b.isCaptain !== undefined) set.isCaptain = !!b.isCaptain;
+  if (set.isCaptain) set.price = 0;
+  else if (b.price !== undefined) {
+    const n = Number(b.price);
+    if (!Number.isInteger(n) || n < 0) throw new ValidationError('Price must be a whole number');
+    set.price = n;
+  }
+  const p = await Player.findOneAndUpdate({ _id: req.params.playerId, teamId: req.params.id, status: 'retained' }, { $set: set }, { returnDocument: 'after' });
+  if (!p) return res.status(404).json({ error: 'NOT_FOUND' });
+  if (p.isCaptain) await setCaptain(p.teamId, p);
+  await auctionService.reload();
+  return res.json({ ok: true });
 }));
 
 router.delete('/teams/:id/retained/:playerId', h(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.playerId)) return res.status(404).json({ error: 'NOT_FOUND' });
   const p = await Player.findOneAndUpdate(
     { _id: req.params.playerId, teamId: req.params.id, status: 'retained' },
-    { $set: { status: 'available', teamId: null, price: null } },
+    { $set: { status: 'available', teamId: null, price: null, isCaptain: false } },
   );
   if (!p) return res.status(404).json({ error: 'NOT_FOUND' });
   await auctionService.reload();
@@ -511,6 +546,8 @@ function playerOut(p) {
     photoUrl: urlFor(p.photoKey),
     thumbUrl: urlFor(p.thumbKey) || urlFor(p.photoKey),
     photoSource: p.photoSource,
+    department: p.department || '',
+    isCaptain: !!p.isCaptain,
     photoError: p.photoError,
     attributes: p.attributes || {},
     extra: p.extra || {},
@@ -529,6 +566,7 @@ function cleanPlayer(b, partial) {
   }
   if (b.tier !== undefined) out.tier = String(b.tier).trim().slice(0, 30);
   if (b.year !== undefined) out.year = String(b.year).trim().slice(0, 30);
+  if (b.department !== undefined) out.department = String(b.department).trim().slice(0, 60);
   if (b.order !== undefined) out.order = Number(b.order) || 0;
   if (b.basePrice !== undefined) {
     if (b.basePrice === null || b.basePrice === '') out.basePrice = null;
@@ -650,6 +688,45 @@ router.get('/logs', h(async (req, res) => {
   const filter = req.query.type ? { type: String(req.query.type) } : {};
   const logs = await AuditLog.find(filter).sort({ at: -1 }).limit(Math.min(Number(req.query.limit) || 200, 1000)).lean();
   res.json(logs);
+}));
+
+router.get('/export.xlsx', h(async (req, res) => {
+  const ExcelJS = (await import('exceljs')).default;
+  const [players, teams, doc] = await Promise.all([Player.find().sort({ position: 1, name: 1 }).lean(), Team.find().sort({ order: 1, name: 1 }).lean(), getSettingsDoc()]);
+  const { auction } = resolveSections(doc.toObject());
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'IEM FED Cup';
+  const head = (ws, color = 'FF0B0B0C') => {
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+  };
+  const role = (p) => (p.isCaptain ? 'Captain' : p.status === 'retained' ? 'Retained' : 'Bought');
+  const sum = wb.addWorksheet('Summary');
+  sum.columns = [{ header: 'Team', key: 'team', width: 26 }, { header: 'Captain', key: 'cap', width: 22 }, { header: 'Players', key: 'n', width: 10 }, { header: 'Budget', key: 'budget', width: 12 }, { header: 'Spent', key: 'spent', width: 12 }, { header: 'Purse left', key: 'left', width: 12 }];
+  head(sum);
+  for (const t of teams) {
+    const squad = players.filter((p) => String(p.teamId) === String(t._id) && ['sold', 'retained'].includes(p.status));
+    const spent = squad.reduce((s, p) => s + (p.price || 0), 0);
+    const budget = t.budget ?? auction.teamBudget;
+    sum.addRow({ team: t.name, cap: t.captainName, n: squad.length, budget, spent, left: budget - spent });
+    const ws = wb.addWorksheet(t.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
+    ws.columns = [{ header: '#', key: 'i', width: 5 }, { header: 'Name', key: 'name', width: 26 }, { header: 'Position', key: 'pos', width: 13 }, { header: 'Department', key: 'dept', width: 16 }, { header: 'Year', key: 'year', width: 10 }, { header: 'Role', key: 'role', width: 11 }, { header: 'Price', key: 'price', width: 10 }];
+    head(ws, `FF${(t.color || '#0b0b0c').replace('#', '').toUpperCase()}`);
+    squad.sort((a, b) => (b.isCaptain - a.isCaptain) || ((b.price || 0) - (a.price || 0)));
+    squad.forEach((p, i) => ws.addRow({ i: i + 1, name: p.name, pos: p.position, dept: p.department, year: p.year, role: role(p), price: p.price || 0 }));
+    const total = ws.addRow({ name: 'Total', price: spent });
+    total.font = { bold: true };
+  }
+  const all = wb.addWorksheet('All players');
+  all.columns = [{ header: 'Name', key: 'name', width: 26 }, { header: 'Position', key: 'pos', width: 13 }, { header: 'Department', key: 'dept', width: 16 }, { header: 'Year', key: 'year', width: 10 }, { header: 'Tier', key: 'tier', width: 10 }, { header: 'Status', key: 'status', width: 11 }, { header: 'Team', key: 'team', width: 24 }, { header: 'Price', key: 'price', width: 10 }];
+  head(all);
+  const teamName = new Map(teams.map((t) => [String(t._id), t.name]));
+  for (const p of players) all.addRow({ name: p.name, pos: p.position, dept: p.department, year: p.year, tier: p.tier, status: p.isCaptain ? 'captain' : p.status, team: p.teamId ? teamName.get(String(p.teamId)) : '', price: p.price ?? '' });
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', `attachment; filename="fedcup-auction-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
 }));
 
 router.get('/export.csv', h(async (req, res) => {

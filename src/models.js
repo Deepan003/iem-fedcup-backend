@@ -12,6 +12,8 @@ const PlayerSchema = new Schema(
     position: { type: String, enum: POSITIONS, required: true },
     tier: { type: String, default: '' },
     year: { type: String, default: '' },
+    department: { type: String, default: '' },
+    isCaptain: { type: Boolean, default: false }, // captains cost nothing
     basePrice: { type: Number, default: null }, // overrides the tier base price
     order: { type: Number, default: 0 }, // order within its position block
     status: { type: String, enum: PLAYER_STATUSES, default: 'available', index: true },
