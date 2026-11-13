@@ -89,13 +89,47 @@ router.get('/players', portalLimiter, portalGate, (req, res) => {
 
 /* ------------------------- images stored in MongoDB ----------------------- */
 
+/*
+ * Keys contain a content hash, so a stored image never changes. Keep recently served images in
+ * memory (≈64 MB cap, oldest evicted first) so hundreds of viewers loading the same player photo
+ * cause one database read, not hundreds. Concurrent misses for the same key share one query.
+ */
+const MEDIA_CACHE_MAX = 64 * 1024 * 1024;
+const mediaCache = new Map(); // key -> { type, body }
+const mediaPending = new Map(); // key -> Promise
+let mediaCacheBytes = 0;
+
+async function loadMedia(key) {
+  const hit = mediaCache.get(key);
+  if (hit) {
+    mediaCache.delete(key); // refresh recency
+    mediaCache.set(key, hit);
+    return hit;
+  }
+  if (mediaPending.has(key)) return mediaPending.get(key);
+  const p = Media.findById(key).lean().then((doc) => {
+    if (!doc) return null;
+    const body = doc.data?.buffer ? Buffer.from(doc.data.buffer) : Buffer.from(doc.data);
+    const entry = { type: doc.contentType, body };
+    mediaCache.set(key, entry);
+    mediaCacheBytes += body.length;
+    for (const [k, v] of mediaCache) {
+      if (mediaCacheBytes <= MEDIA_CACHE_MAX) break;
+      mediaCache.delete(k);
+      mediaCacheBytes -= v.body.length;
+    }
+    return entry;
+  }).finally(() => mediaPending.delete(key));
+  mediaPending.set(key, p);
+  return p;
+}
+
 router.get('/media/*', h(async (req, res) => {
-  const key = req.params[0];
-  const doc = await Media.findById(key).lean();
-  if (!doc) return res.status(404).end();
-  res.set('Content-Type', doc.contentType);
+  const entry = await loadMedia(req.params[0]);
+  if (!entry) return res.status(404).end();
+  res.set('Content-Type', entry.type);
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
-  return res.send(doc.data.buffer ? Buffer.from(doc.data.buffer) : doc.data);
+  return res.send(entry.body);
 }));
 
 export default router;
