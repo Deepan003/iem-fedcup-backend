@@ -21,12 +21,15 @@ async function main() {
   console.log('MongoDB connected');
 
   const settings = await getSettingsDoc();
+  let r2Saved = null;
   try {
-    configureStorage(decryptJson(settings.integrations?.r2Enc));
+    r2Saved = decryptJson(settings.integrations?.r2Enc);
   } catch (err) {
     console.error('Could not decrypt stored R2 credentials (was MASTER_KEY changed?)', err.message);
   }
-  console.log(`Image storage: ${storageMode()}`);
+  // Admin-panel R2 wins; otherwise fall back to R2_* environment variables.
+  configureStorage(r2Saved || config.r2Env);
+  console.log(`Image storage: ${storageMode()}${!r2Saved && config.r2Env && storageMode() === 'r2' ? ' (from environment)' : ''}`);
 
   await auctionService.init();
 

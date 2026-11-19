@@ -13,6 +13,7 @@ import {
 import { processLogo, processPlayerPhoto, describeImageError } from '../lib/images.js';
 import { auctionService, fitOut } from '../auction/service.js';
 import { isOpenPhase } from '../auction/engine.js';
+import { config } from '../config.js';
 import {
   getSettingsDoc, resolveSections, SECTION_CLEANERS, ValidationError,
 } from '../settings.js';
@@ -87,7 +88,8 @@ function loadGoogle(doc) {
 router.get('/integrations', h(async (req, res) => {
   const doc = await getSettingsDoc();
   const sa = decryptJson(doc.integrations?.googleEnc);
-  const r2 = decryptJson(doc.integrations?.r2Enc);
+  const r2Saved = decryptJson(doc.integrations?.r2Enc);
+  const r2 = r2Saved || config.r2Env;
   res.json({
     google: sa ? { configured: true, email: sa.client_email, projectId: sa.project_id } : { configured: false },
     r2: r2
@@ -98,6 +100,7 @@ router.get('/integrations', h(async (req, res) => {
         secretAccessKey: mask(r2.secretAccessKey),
         bucket: r2.bucket,
         publicUrl: r2.publicUrl,
+        source: r2Saved ? 'panel' : 'environment',
       }
       : { configured: false },
     sheet: { url: doc.integrations?.sheetUrl || '', tab: doc.integrations?.sheetTab || '' },
@@ -179,7 +182,7 @@ router.delete('/integrations/r2', h(async (req, res) => {
   const doc = await getSettingsDoc();
   doc.integrations.r2Enc = '';
   await doc.save();
-  configureStorage(null);
+  configureStorage(config.r2Env); // back to the environment R2, if any
   await auctionService.reload();
   res.json({ ok: true, storageMode: storageMode() });
 }));

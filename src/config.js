@@ -29,4 +29,15 @@ export const config = {
     .map((s) => s.trim().replace(/\/$/, ''))
     .filter(Boolean),
   isProd: process.env.NODE_ENV === 'production',
+  /**
+   * Optional R2 from the environment (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+   * R2_BUCKET_NAME, R2_PUBLIC_BASE_URL). Used when no R2 is saved in the admin panel.
+   */
+  r2Env: process.env.R2_ACCOUNT_ID ? {
+    accountId: process.env.R2_ACCOUNT_ID.trim(),
+    accessKeyId: (process.env.R2_ACCESS_KEY_ID || '').trim(),
+    secretAccessKey: (process.env.R2_SECRET_ACCESS_KEY || '').trim(),
+    bucket: (process.env.R2_BUCKET_NAME || '').trim(),
+    publicUrl: (process.env.R2_PUBLIC_BASE_URL || '').trim(),
+  } : null,
 };
