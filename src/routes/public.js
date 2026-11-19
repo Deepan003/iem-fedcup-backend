@@ -21,6 +21,7 @@ router.get('/config', (req, res) => {
     },
     auctionStatus: st.status,
     portalMode: portal.mode,
+    cardsEnabled: !!portal.cards,
     currency: auction.currency,
     decimals: auction.decimals || 0,
     serverNow: Date.now(),

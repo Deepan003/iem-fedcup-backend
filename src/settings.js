@@ -61,6 +61,7 @@ export const DEFAULTS = {
   },
   portal: {
     mode: 'public', // public | code | off
+    cards: false, // player cards download on the players page (switch on after the auction)
   },
   // Studio screensavers: shown when paused / between players / on demand.
   screens: {
@@ -197,7 +198,7 @@ function cleanStudio(s) {
 
 function cleanPortal(p) {
   const mode = ['public', 'code', 'off'].includes(p.mode) ? p.mode : 'public';
-  return { mode };
+  return { mode, cards: p.cards === undefined ? false : bool(p.cards) };
 }
 
 function cleanAudio(a) {
