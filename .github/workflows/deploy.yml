@@ -1,0 +1,182 @@
+
+name: Deploy IEM FedCup Backend
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iem-fedcup-backend-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and Deploy Backend
+    runs-on: self-hosted
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Install Node.js 22 system-wide if missing
+      - name: Ensure Node.js 22
+        run: |
+          if ! command -v node >/dev/null 2>&1 || \
+             ! node -e "process.exit(process.versions.node.startsWith('22.') ? 0 : 1)"; then
+
+            echo "Installing Node.js 22..."
+
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates
+
+            curl -fsSL https://deb.nodesource.com/setup_22.x \
+              -o /tmp/nodesource_setup.sh
+
+            sudo -E bash /tmp/nodesource_setup.sh
+            sudo apt-get install -y nodejs
+          fi
+
+          echo "Node.js: $(node -v)"
+          echo "NPM: $(npm -v)"
+          echo "Node path: $(which node)"
+
+      # 3. Install PM2 and deployment utilities
+      - name: Install Deployment Tools
+        run: |
+          if ! command -v pm2 >/dev/null 2>&1; then
+            sudo npm install -g pm2
+          fi
+
+          if ! command -v fuser >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y psmisc
+          fi
+
+          if ! command -v curl >/dev/null 2>&1; then
+            sudo apt-get install -y curl
+          fi
+
+          echo "PM2: $(pm2 -v)"
+          echo "PM2 path: $(which pm2)"
+
+      # 4. Stop existing backend
+      - name: Stop Existing Backend
+        run: |
+          echo "Checking existing PM2 process..."
+
+          if pm2 describe iem-fedcup-backend >/dev/null 2>&1; then
+            echo "Stopping existing backend..."
+            pm2 delete iem-fedcup-backend
+          else
+            echo "No existing backend process found."
+          fi
+
+          echo "Checking port 4000..."
+
+          if sudo fuser -s 4000/tcp; then
+            echo "Stopping remaining process on port 4000..."
+            sudo fuser -k 4000/tcp || true
+          else
+            echo "Port 4000 is already free."
+          fi
+
+          sleep 3
+
+      # 5. Clean previous deployment
+      - name: Clean Previous Deployment
+        run: |
+          DEPLOY_DIR="/var/www/iem-fedcup-backend"
+
+          sudo mkdir -p "$DEPLOY_DIR"
+
+          sudo find "$DEPLOY_DIR" \
+            -mindepth 1 -maxdepth 1 \
+            -exec rm -rf {} +
+
+          sudo chown -R "$USER":"$(id -gn)" "$DEPLOY_DIR"
+
+      # 6. Copy application files
+      - name: Copy Application Files
+        run: |
+          cp -a "$GITHUB_WORKSPACE/." /var/www/iem-fedcup-backend/
+
+      # 7. Install production dependencies
+      - name: Install Production Dependencies
+        working-directory: /var/www/iem-fedcup-backend
+        run: |
+          npm ci --omit=dev
+
+      # 8. Validate application
+      - name: Validate Application
+        working-directory: /var/www/iem-fedcup-backend
+        run: |
+          node --check src/index.js
+
+          echo "Application syntax validation passed."
+
+      # 9. Start backend with PM2
+      - name: Start Backend with PM2
+        working-directory: /var/www/iem-fedcup-backend
+        env:
+          NODE_ENV: production
+          PORT: 4000
+
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MASTER_KEY: ${{ secrets.MASTER_KEY }}
+
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+
+        run: |
+          pm2 start npm \
+            --name iem-fedcup-backend \
+            -- start
+
+          pm2 save
+
+      # 10. Verify backend health
+      - name: Verify Backend Health
+        run: |
+          echo "Waiting for backend..."
+
+          curl --fail \
+            --silent \
+            --show-error \
+            --retry 10 \
+            --retry-delay 3 \
+            --retry-connrefused \
+            http://127.0.0.1:4000/api/health
+
+          echo ""
+          echo "===== PM2 STATUS ====="
+          pm2 status
+
+          echo ""
+          echo "===== LISTENING PORT ====="
+          sudo ss -lntp | grep ':4000'
+
+      # 11. Deployment complete
+      - name: Deployment Complete
+        run: |
+          echo "======================================"
+          echo "IEM FedCup Backend Deployed"
+          echo "======================================"
+          echo "Application : iem-fedcup-backend"
+          echo "Directory   : /var/www/iem-fedcup-backend"
+          echo "Port        : 4000"
+          echo "Node.js     : $(node -v)"
+          echo "PM2         : $(pm2 -v)"
+          echo "Process     : PM2"
+          echo "======================================"
