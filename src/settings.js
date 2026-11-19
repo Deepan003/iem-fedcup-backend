@@ -72,6 +72,7 @@ export const DEFAULTS = {
     callBids: 'every', // every | leader | off
     goingOnceTwice: true,
     music: true,
+    introSeconds: 25, // intro music plays this long, then fades out (0 = whole track)
     crowd: true, // stadium crowd ambience and cheers
     sfxVolume: 80,
     musicVolume: 45,
@@ -199,6 +200,7 @@ function cleanAudio(a) {
     callBids: ['every', 'leader', 'off'].includes(a.callBids) ? a.callBids : d.callBids,
     goingOnceTwice: flag('goingOnceTwice'),
     music: flag('music'),
+    introSeconds: pct(a.introSeconds, 'Intro music length', d.introSeconds, 0, 600),
     crowd: flag('crowd'),
     sfxVolume: pct(a.sfxVolume, 'Effects volume', d.sfxVolume),
     musicVolume: pct(a.musicVolume, 'Music volume', d.musicVolume),
@@ -215,7 +217,7 @@ export const SECTION_CLEANERS = {
 };
 
 /** Music slots the admin can upload: intro (auction start), bed (background loop), sold (sting). */
-export const AUDIO_SLOTS = ['intro', 'bed', 'sold'];
+export const AUDIO_SLOTS = ['intro', 'bed', 'sold', 'bid', 'newPlayer', 'hammer', 'record', 'unsold', 'end'];
 
 /* ------------------------------ access ------------------------------ */
 
