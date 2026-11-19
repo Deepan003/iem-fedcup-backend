@@ -58,6 +58,12 @@ export function nextBidAmount(lot, slabs) {
   return lot.amount + stepFor(lot.amount, slabs);
 }
 
+/** Normalised tier name for matching: lower-case, single spaces, without a leading "tier". */
+export function tierKey(name) {
+  const s = String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return s.replace(/^tier[\s_:#.-]*/, '') || s;
+}
+
 export class AuctionEngine {
   /**
    * @param {object} opts
@@ -98,11 +104,14 @@ export class AuctionEngine {
     return tier ? tier.basePrice : this.settings.defaultBasePrice;
   }
 
-  /** The configured tier for a player; matching ignores case and extra spaces ("gold " = "Gold"). */
+  /**
+   * The configured tier for a player. Matching ignores case, spaces and a leading word "tier",
+   * so a sheet value of "2", "tier 2" or "TIER-2" all match a tier named "Tier 2" (and "gold " = "Gold").
+   */
   tierOf(player) {
-    const key = String(player?.tier || '').trim().toLowerCase();
+    const key = tierKey(player?.tier);
     if (!key) return null;
-    return this.settings.tiers.find((t) => String(t.name).trim().toLowerCase() === key) || null;
+    return this.settings.tiers.find((t) => tierKey(t.name) === key) || null;
   }
 
   /**

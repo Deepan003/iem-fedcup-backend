@@ -709,6 +709,7 @@ function playerOut(p) {
     // What the auction will actually open at (own price, else tier price, else default).
     effectiveBase: auctionService.engine?.basePriceFor(p) ?? null,
     tierMatched: !!auctionService.engine?.tierOf(p),
+    tierName: auctionService.engine?.tierOf(p)?.name || null, // the Rules tier this player maps to
     order: p.order,
     status: p.status,
     teamId: p.teamId ? String(p.teamId) : null,

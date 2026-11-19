@@ -278,3 +278,13 @@ test('penalties come off the purse and cap the max bid', () => {
   assert.equal(code(() => engine.bid({ teamId: 'A', amount: lot.base, lotSeq: lot.seq })), 'OVER_BUDGET');
   engine.bid({ teamId: 'B', amount: lot.base, lotSeq: lot.seq });
 });
+
+test('tier matching accepts sheet values like "2" or "tier-2" for a tier named "Tier 2"', () => {
+  const { engine } = setup({ tiers: [{ name: 'Tier 1', basePrice: 100 }, { name: 'Tier 2', basePrice: 60 }, { name: 'Gold', basePrice: 50 }] });
+  assert.equal(engine.basePriceFor({ tier: '2' }), 60);
+  assert.equal(engine.basePriceFor({ tier: ' tier-2 ' }), 60);
+  assert.equal(engine.basePriceFor({ tier: 'TIER 1' }), 100);
+  assert.equal(engine.basePriceFor({ tier: 'gold' }), 50);
+  assert.equal(engine.basePriceFor({ tier: '3' }), 10); // no such tier: default
+  assert.equal(engine.tierOf({ tier: '2' })?.name, 'Tier 2');
+});
