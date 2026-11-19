@@ -62,6 +62,18 @@ export const DEFAULTS = {
   portal: {
     mode: 'public', // public | code | off
   },
+  // Studio screensavers: shown when paused / between players / on demand.
+  screens: {
+    enabled: true,
+    onPause: true,
+    betweenLots: false,
+    forceOn: false, // "Show now" from the control room
+    show: '', // one chosen screen (e.g. "top3", "r-<teamId>", "c-0"); empty = rotate through the ticked ones
+    slideSeconds: 8,
+    shuffle: false,
+    items: ['retained', 'top3', 'record', 'war', 'teams', 'teamsAll', 'custom'],
+    custom: [], // [{ title, text }]
+  },
   audio: {
     enabled: true, // master switch for every screen
     studioSound: true, // studio / projector plays sound
@@ -208,12 +220,35 @@ function cleanAudio(a) {
   };
 }
 
+export const SCREEN_ITEMS = ['retained', 'top3', 'record', 'war', 'teams', 'teamsAll', 'custom'];
+
+function cleanScreens(s) {
+  const d = DEFAULTS.screens;
+  const flag = (k) => (s[k] === undefined ? d[k] : bool(s[k]));
+  const items = (Array.isArray(s.items) ? s.items : d.items).filter((x, i, arr) => SCREEN_ITEMS.includes(x) && arr.indexOf(x) === i);
+  const custom = (Array.isArray(s.custom) ? s.custom : []).slice(0, 12)
+    .map((c) => ({ title: str(c?.title, 80), text: str(c?.text, 400) }))
+    .filter((c) => c.title || c.text);
+  return {
+    enabled: flag('enabled'),
+    onPause: flag('onPause'),
+    betweenLots: flag('betweenLots'),
+    forceOn: flag('forceOn'),
+    show: /^[\w-]{0,60}$/.test(String(s.show ?? '')) ? String(s.show ?? '') : '',
+    slideSeconds: s.slideSeconds === undefined ? d.slideSeconds : int(s.slideSeconds, 'Slide time', { min: 3, max: 60 }),
+    shuffle: flag('shuffle'),
+    items,
+    custom,
+  };
+}
+
 export const SECTION_CLEANERS = {
   auction: cleanAuction,
   captainView: cleanCaptainView,
   studio: cleanStudio,
   portal: cleanPortal,
   audio: cleanAudio,
+  screens: cleanScreens,
 };
 
 /** Music slots the admin can upload: intro (auction start), bed (background loop), sold (sting). */

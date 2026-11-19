@@ -111,6 +111,8 @@ export class AuctionService {
     this.engine = new AuctionEngine({ ...data, state: saved?.state });
     this.engine.recoverAfterRestart();
     this.engine.drainDirty();
+    this.stories = new Map(); // playerId -> { history: [{ teamId, amount }], bids }
+    this.#loadStories().catch((err) => console.error('loading bid stories', err));
     this.#persist({ players: [], bids: [], logs: [] });
     this.#schedule();
     this.backupTick = setInterval(() => this.#tick(), 1000);
@@ -252,6 +254,17 @@ export class AuctionService {
       } else {
         logs.push({ type: ev.type, actor: meta.actor, data: { ...ev, args: meta.args } });
       }
+    }
+    for (const ev of events) {
+      if (ev.type === 'sold') {
+        const lot = this.engine.state.lot;
+        if (lot && lot.playerId === ev.playerId) {
+          this.stories.set(ev.playerId, { history: [...lot.history].reverse().map((h) => ({ teamId: h.teamId, amount: h.amount })), bids: lot.bidCount || lot.history.length });
+        }
+        // the live history keeps only the latest bids: fill in the full story once the bids are saved
+        setTimeout(() => this.#storyFromDb(ev.playerId, ev.seq).catch(() => {}), 2500);
+      }
+      if (ev.type === 'undo') this.stories.delete(ev.playerId);
     }
     const players = this.engine.drainDirty().map((id) => ({ ...this.engine.players.get(id) }));
     this.#persist({ players, bids, logs });
@@ -505,6 +518,7 @@ export class AuctionService {
         title: sv.title, subtitle: sv.subtitle, live: sv.live, startsAt: sv.startsAt,
       },
       audio: this.audioState(),
+      screens: this.screensState(),
     };
 
     if (isCaptain) {
@@ -533,6 +547,62 @@ export class AuctionService {
     for (const id of this.engine.teams.keys()) {
       this.io.to(`team:${id}`).emit('bid', hidden ? { ...msg, lot: { ...lot, history: [] } } : msg);
     }
+  }
+
+  async #storyFromDb(playerId, lotSeq) {
+    const rows = await Bid.find({ playerId, lotSeq }, { teamId: 1, amount: 1, at: 1 }).sort({ at: 1 }).lean();
+    if (rows.length) this.stories.set(String(playerId), { history: rows.map((r) => ({ teamId: String(r.teamId), amount: r.amount })), bids: rows.length });
+  }
+
+  async #loadStories() {
+    const sold = [...this.engine.players.values()].filter((p) => p.status === 'sold' && p.lotSeq != null);
+    if (!sold.length) return;
+    const rows = await Bid.find({ playerId: { $in: sold.map((p) => p.id) } }, { playerId: 1, lotSeq: 1, teamId: 1, amount: 1, at: 1 }).sort({ at: 1 }).lean();
+    const seqOf = new Map(sold.map((p) => [p.id, p.lotSeq]));
+    for (const r of rows) {
+      const id = String(r.playerId);
+      if (r.lotSeq !== seqOf.get(id)) continue;
+      const st = this.stories.get(id) || { history: [], bids: 0 };
+      st.history.push({ teamId: String(r.teamId), amount: r.amount });
+      st.bids += 1;
+      this.stories.set(id, st);
+    }
+  }
+
+  /** Screensaver settings plus what the prebuilt screens show (same for every viewer). */
+  screensState() {
+    const sc = this.sections?.screens || {};
+    const e = this.engine;
+    const card = (p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      department: p.department,
+      year: p.year,
+      tier: e.tierOf(p)?.name || p.tier,
+      teamId: p.teamId,
+      price: p.price,
+      isCaptain: !!p.isCaptain,
+      photoUrl: urlFor(p.photoKey) || urlFor(p.thumbKey),
+    });
+    const all = [...e.players.values()];
+    const sold = all.filter((p) => p.status === 'sold').sort((a, b) => (b.price || 0) - (a.price || 0));
+    const story = (p) => {
+      const st = p && this.stories?.get(p.id);
+      return st && st.history.length ? { ...card(p), history: st.history.slice(-30), bids: st.bids } : null;
+    };
+    let war = null;
+    for (const p of sold) {
+      const st = this.stories?.get(p.id);
+      if (st && st.bids >= 3 && (!war || st.bids > war.bids)) war = { p, bids: st.bids };
+    }
+    return {
+      ...sc,
+      top: sold.slice(0, 3).map(card),
+      topStory: story(sold[0]),
+      war: war ? story(war.p) : null,
+      retained: all.filter((p) => p.status === 'retained').map(card),
+    };
   }
 
   /** Sound settings plus playable URLs of uploaded music, for every screen. */
