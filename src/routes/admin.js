@@ -154,7 +154,8 @@ router.post('/integrations/google/test', h(async (req, res) => {
 
 router.put('/integrations/r2', h(async (req, res) => {
   const doc = await getSettingsDoc();
-  const prev = decryptJson(doc.integrations?.r2Enc) || {};
+  // Masked fields (••••) keep the current secret: the panel's saved one, else the environment's.
+  const prev = decryptJson(doc.integrations?.r2Enc) || config.r2Env || {};
   const b = req.body || {};
   const keep = (field) => (String(b[field] || '').includes('••••') || !b[field] ? prev[field] : String(b[field]).trim());
   const cfg = {
