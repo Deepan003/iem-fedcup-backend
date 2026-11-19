@@ -8,60 +8,89 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
+    name: Build and Deploy Backend
     runs-on: self-hosted
 
     steps:
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - name: Install PM2 if Missing
+      # 3. Install required system tools
+      - name: Install Deployment Tools
         run: |
           if ! command -v pm2 >/dev/null 2>&1; then
             npm install -g pm2
           fi
 
+          if ! command -v fuser >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y psmisc
+          fi
+
+      # 4. Stop existing backend process
       - name: Stop Existing Backend
         run: |
-          pm2 delete iem-fedcup-backend || true
+          echo "Checking existing PM2 process..."
 
-          if command -v fuser >/dev/null 2>&1; then
-            if sudo fuser -s 4000/tcp; then
-              sudo fuser -k 4000/tcp || true
-            fi
+          if pm2 describe iem-fedcup-backend >/dev/null 2>&1; then
+            echo "Stopping existing backend..."
+            pm2 delete iem-fedcup-backend
+          else
+            echo "No existing backend process found. Fresh deployment."
+          fi
+
+          echo "Checking port 4000..."
+
+          if sudo fuser -s 4000/tcp; then
+            echo "Stopping remaining process on port 4000..."
+            sudo fuser -k 4000/tcp || true
+          else
+            echo "Port 4000 is already free."
           fi
 
           sleep 3
 
+      # 5. Clean previous deployment
       - name: Clean Previous Deployment
         run: |
-          sudo mkdir -p /var/www/iem-fedcup-backend
-          sudo rm -rf /var/www/iem-fedcup-backend/*
-          sudo rm -rf /var/www/iem-fedcup-backend/.[!.]*
+          DEPLOY_DIR="/var/www/iem-fedcup-backend"
 
-          sudo chown -R "$USER":"$(id -gn)" /var/www/iem-fedcup-backend
+          sudo mkdir -p "$DEPLOY_DIR"
+          sudo find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
+          sudo chown -R "$USER":"$(id -gn)" "$DEPLOY_DIR"
+
+      # 6. Copy application files
       - name: Copy Application Files
         run: |
           cp -a "$GITHUB_WORKSPACE/." /var/www/iem-fedcup-backend/
 
+      # 7. Install production dependencies
       - name: Install Production Dependencies
         working-directory: /var/www/iem-fedcup-backend
         run: |
           npm ci --omit=dev
 
+      # 8. Validate application
       - name: Validate Application
         working-directory: /var/www/iem-fedcup-backend
         run: |
           node --check src/index.js
 
+      # 9. Start backend using PM2
       - name: Start Backend with PM2
         working-directory: /var/www/iem-fedcup-backend
         env:
@@ -80,21 +109,35 @@ jobs:
           CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
 
         run: |
-          pm2 start npm --name iem-fedcup-backend -- start
+          pm2 start npm \
+            --name iem-fedcup-backend \
+            -- start
+
           pm2 save
 
+      # 10. Verify backend health
       - name: Verify Backend Health
         run: |
-          sleep 5
-
-          pm2 status
+          echo "Waiting for backend..."
 
           curl --fail \
-            --retry 5 \
+            --retry 10 \
             --retry-delay 3 \
+            --retry-connrefused \
             http://127.0.0.1:4000/api/health
 
+          echo ""
+          echo "PM2 Process Status:"
+          pm2 status
+
+      # 11. Deployment complete
       - name: Deployment Complete
         run: |
-          echo "Backend deployment completed successfully."
-          pm2 describe iem-fedcup-backend
+          echo "=================================="
+          echo "IEM FedCup Backend Deployed"
+          echo "=================================="
+          echo "Application : iem-fedcup-backend"
+          echo "Directory   : /var/www/iem-fedcup-backend"
+          echo "Port        : 4000"
+          echo "Process     : PM2"
+          echo "=================================="
