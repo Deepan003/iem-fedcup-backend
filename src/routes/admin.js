@@ -61,6 +61,7 @@ router.put('/portal-code', h(async (req, res) => {
   const doc = await getSettingsDoc();
   doc.portalCodeEnc = code ? encrypt(code) : '';
   await doc.save();
+  auctionService.touch();
   res.json({ ok: true, code: code ? mask(code) : '' });
 }));
 
@@ -115,6 +116,7 @@ router.put('/integrations/google', h(async (req, res) => {
   doc.integrations.googleEnc = encryptJson(sa);
   await doc.save();
   await AuditLog.create({ type: 'integration', actor: 'admin', data: { google: sa.client_email } });
+  auctionService.touch();
   res.json({ ok: true, email: sa.client_email });
 }));
 
@@ -122,6 +124,7 @@ router.delete('/integrations/google', h(async (req, res) => {
   const doc = await getSettingsDoc();
   doc.integrations.googleEnc = '';
   await doc.save();
+  auctionService.touch();
   res.json({ ok: true });
 }));
 
@@ -132,6 +135,7 @@ router.put('/integrations/sheet', h(async (req, res) => {
   doc.integrations.sheetUrl = url;
   doc.integrations.sheetTab = String(req.body?.tab || '').trim();
   await doc.save();
+  auctionService.touch();
   res.json({ ok: true });
 }));
 
@@ -270,6 +274,8 @@ router.post('/import/photos', h(async (req, res) => {
   const doc = await getSettingsDoc();
   const g = loadGoogle(doc);
   let lastEmit = 0;
+  let lastReload = 0;
+  let lastReloadOk = 0;
   const job = startPhotoSync({
     googleClient: g?.client || null,
     force: !!req.body?.force,
@@ -279,6 +285,11 @@ router.post('/import/photos', h(async (req, res) => {
       if (j.running && now - lastEmit < 400) return;
       lastEmit = now;
       auctionService.io?.to('admin').emit('job', { kind: 'photos', ...j });
+      if (j.running && j.ok > lastReloadOk && now - lastReload > 8000) {
+        lastReload = now;
+        lastReloadOk = j.ok;
+        auctionService.reload().catch((err) => console.error('reload during photos', err));
+      }
       if (!j.running) {
         auctionService.reload().catch((err) => console.error('reload after photos', err));
         AuditLog.create({ type: 'photos', actor: 'admin', data: { total: j.total, ok: j.ok, failed: j.failed.length } }).catch(() => {});

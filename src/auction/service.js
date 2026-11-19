@@ -532,6 +532,12 @@ export class AuctionService {
     }
   }
 
+  /** Tell every open screen that admin data changed (no auction-state reload needed). */
+  touch() {
+    this.dataV = Date.now();
+    this.broadcastFull();
+  }
+
   broadcastFull() {
     if (!this.io || !this.engine) return;
     this.io.to('public').emit('state', this.stateFor({ role: 'public' }));
