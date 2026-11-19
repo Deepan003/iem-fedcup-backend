@@ -312,23 +312,29 @@ router.get('/storage', h(async (req, res) => {
   const ownBytes = (own.dataSize || 0) + (own.indexSize || 0);
   const [media] = await Media.aggregate([{ $group: { _id: null, bytes: { $sum: '$size' }, count: { $sum: 1 } } }]);
 
-  const databases = [];
-  let totalBytes = ownBytes;
+  // Whole-cluster usage when the login can see it. Other apps' database NAMES are never
+  // returned: the cluster may be shared with unrelated projects.
+  let cluster = null;
   try {
     const { databases: list } = await db.admin().listDatabases();
-    totalBytes = 0;
+    let total = 0;
+    let others = 0;
+    let hasSampleData = false;
     for (const d of list) {
       if (['admin', 'local', 'config'].includes(d.name)) continue;
       // eslint-disable-next-line no-await-in-loop
       const s = await mongoose.connection.client.db(d.name).stats();
-      const bytes = (s.dataSize || 0) + (s.indexSize || 0);
-      totalBytes += bytes;
-      databases.push({ name: d.name, bytes, current: d.name === db.databaseName });
+      total += (s.dataSize || 0) + (s.indexSize || 0);
+      if (d.name !== db.databaseName) {
+        others += 1;
+        if (d.name.startsWith('sample_')) hasSampleData = true;
+      }
     }
+    cluster = { totalBytes: total, otherBytes: Math.max(0, total - ownBytes), otherDatabases: others, hasSampleData };
   } catch {
-    databases.push({ name: db.databaseName, bytes: ownBytes, current: true });
+    // No permission to list databases: only our own database is visible.
   }
-  databases.sort((a, b) => b.bytes - a.bytes);
+  const totalBytes = cluster ? cluster.totalBytes : ownBytes;
 
   res.json({
     limitBytes: FREE_TIER_BYTES,
@@ -336,7 +342,7 @@ router.get('/storage', h(async (req, res) => {
     percent: Math.round((totalBytes / FREE_TIER_BYTES) * 1000) / 10,
     auction: { bytes: ownBytes, database: db.databaseName },
     images: { bytes: media?.bytes || 0, count: media?.count || 0, storedIn: storageMode() },
-    databases,
+    cluster,
   });
 }));
 
