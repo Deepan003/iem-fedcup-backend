@@ -931,6 +931,74 @@ router.get('/export.xlsx', h(async (req, res) => {
   res.end();
 }));
 
+/**
+ * Report downloads: bid history, players sold in the main auction, players sold in an unsold round,
+ * and players who ended up unsold. ?format=xlsx (Excel) or json (the admin page prints it as a PDF).
+ */
+const REPORTS = {
+  bids: 'Bid history',
+  'sold-main': 'Sold in the auction',
+  'sold-unsold': 'Sold from the unsold round',
+  unsold: 'Unsold players',
+};
+router.get('/report/:kind', h(async (req, res) => {
+  const kind = req.params.kind;
+  if (!Object.hasOwn(REPORTS, kind)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const [players, teams, doc] = await Promise.all([Player.find().lean(), Team.find().lean(), getSettingsDoc()]);
+  const { auction } = resolveSections(doc.toObject());
+  const unit = 10 ** (auction.decimals || 0);
+  const M = (n) => (n == null ? null : Number(n) / unit);
+  const teamName = new Map(teams.map((t) => [String(t._id), t.name]));
+  const byId = new Map(players.map((p) => [String(p._id), p]));
+  const baseOf = (p) => { const e = auctionService.engine.players.get(String(p._id)); return e ? auctionService.engine.basePriceFor(e) : p.basePrice; };
+  let columns;
+  let rows;
+  if (kind === 'bids') {
+    const bids = await Bid.find().sort({ lotSeq: 1, at: 1 }).lean();
+    columns = [['lot', 'Lot'], ['round', 'Round'], ['player', 'Player'], ['position', 'Position'], ['team', 'Team'], ['amount', `Bid (${auction.currency})`], ['source', 'By'], ['time', 'Time']];
+    rows = bids.map((b) => {
+      const p = byId.get(String(b.playerId));
+      return {
+        lot: b.lotSeq, round: b.round ?? 1, player: p?.name || '—', position: p?.position || '', team: teamName.get(String(b.teamId)) || '', amount: M(b.amount), source: b.source || '', time: b.at ? new Date(b.at).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' }) : '',
+      };
+    });
+  } else if (kind === 'unsold') {
+    columns = [['name', 'Player'], ['position', 'Position'], ['tier', 'Tier'], ['department', 'Department'], ['year', 'Year'], ['base', `Base (${auction.currency})`]];
+    rows = players.filter((p) => p.status === 'unsold').sort((a, b) => a.position.localeCompare(b.position) || a.name.localeCompare(b.name))
+      .map((p) => ({
+        name: p.name, position: p.position, tier: p.tier || '', department: p.department || '', year: p.year || '', base: M(baseOf(p)),
+      }));
+  } else {
+    // which round each sale happened in: from the winning lot's bids
+    const sold = players.filter((p) => p.status === 'sold');
+    const lots = await Bid.aggregate([{ $match: { lotSeq: { $in: sold.map((p) => p.lotSeq).filter((x) => x != null) } } }, { $group: { _id: '$lotSeq', round: { $max: '$round' }, bids: { $sum: 1 } } }]);
+    const lotInfo = new Map(lots.map((l) => [l._id, l]));
+    const wanted = sold.filter((p) => {
+      const r = lotInfo.get(p.lotSeq)?.round ?? 1;
+      return kind === 'sold-main' ? r <= 1 : r > 1;
+    }).sort((a, b) => (a.lotSeq ?? 0) - (b.lotSeq ?? 0));
+    columns = [['lot', 'Lot'], ['name', 'Player'], ['position', 'Position'], ['tier', 'Tier'], ['team', 'Team'], ['price', `Price (${auction.currency})`], ['bids', 'Bids']];
+    rows = wanted.map((p) => ({
+      lot: p.lotSeq, name: p.name, position: p.position, tier: p.tier || '', team: teamName.get(String(p.teamId)) || '', price: M(p.price), bids: lotInfo.get(p.lotSeq)?.bids ?? 0,
+    }));
+  }
+  const title = REPORTS[kind];
+  if (req.query.format !== 'xlsx') return res.json({ title, columns, rows });
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'IEM FED Cup';
+  const ws = wb.addWorksheet(title.slice(0, 31));
+  ws.columns = columns.map(([key, header]) => ({ header, key, width: Math.max(10, header.length + 4, key === 'player' || key === 'name' || key === 'team' ? 26 : 0) }));
+  ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B0B0C' } };
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  rows.forEach((r) => ws.addRow(r));
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', `attachment; filename="fedcup-${kind}-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+  await wb.xlsx.write(res);
+  return res.end();
+}));
+
 router.get('/export.csv', h(async (req, res) => {
   const [players, teams] = await Promise.all([
     Player.find().sort({ position: 1, name: 1 }).lean(),
