@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: iem-fedcup-backend-deployment
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Build and Deploy Backend
@@ -21,18 +25,33 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+      # 2. Install Node.js 22 system-wide if missing
+      - name: Ensure Node.js 22
+        run: |
+          if ! command -v node >/dev/null 2>&1 || \
+             ! node -e "process.exit(process.versions.node.startsWith('22.') ? 0 : 1)"; then
 
-      # 3. Install required system tools
+            echo "Installing Node.js 22..."
+
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates
+
+            curl -fsSL https://deb.nodesource.com/setup_22.x \
+              -o /tmp/nodesource_setup.sh
+
+            sudo -E bash /tmp/nodesource_setup.sh
+            sudo apt-get install -y nodejs
+          fi
+
+          echo "Node.js: $(node -v)"
+          echo "NPM: $(npm -v)"
+          echo "Node path: $(which node)"
+
+      # 3. Install PM2 and deployment utilities
       - name: Install Deployment Tools
         run: |
           if ! command -v pm2 >/dev/null 2>&1; then
-            npm install -g pm2
+            sudo npm install -g pm2
           fi
 
           if ! command -v fuser >/dev/null 2>&1; then
@@ -40,7 +59,14 @@ jobs:
             sudo apt-get install -y psmisc
           fi
 
-      # 4. Stop existing backend process
+          if ! command -v curl >/dev/null 2>&1; then
+            sudo apt-get install -y curl
+          fi
+
+          echo "PM2: $(pm2 -v)"
+          echo "PM2 path: $(which pm2)"
+
+      # 4. Stop existing backend
       - name: Stop Existing Backend
         run: |
           echo "Checking existing PM2 process..."
@@ -49,7 +75,7 @@ jobs:
             echo "Stopping existing backend..."
             pm2 delete iem-fedcup-backend
           else
-            echo "No existing backend process found. Fresh deployment."
+            echo "No existing backend process found."
           fi
 
           echo "Checking port 4000..."
@@ -69,7 +95,10 @@ jobs:
           DEPLOY_DIR="/var/www/iem-fedcup-backend"
 
           sudo mkdir -p "$DEPLOY_DIR"
-          sudo find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+          sudo find "$DEPLOY_DIR" \
+            -mindepth 1 -maxdepth 1 \
+            -exec rm -rf {} +
 
           sudo chown -R "$USER":"$(id -gn)" "$DEPLOY_DIR"
 
@@ -90,7 +119,9 @@ jobs:
         run: |
           node --check src/index.js
 
-      # 9. Start backend using PM2
+          echo "Application syntax validation passed."
+
+      # 9. Start backend with PM2
       - name: Start Backend with PM2
         working-directory: /var/www/iem-fedcup-backend
         env:
@@ -121,23 +152,31 @@ jobs:
           echo "Waiting for backend..."
 
           curl --fail \
+            --silent \
+            --show-error \
             --retry 10 \
             --retry-delay 3 \
             --retry-connrefused \
             http://127.0.0.1:4000/api/health
 
           echo ""
-          echo "PM2 Process Status:"
+          echo "===== PM2 STATUS ====="
           pm2 status
+
+          echo ""
+          echo "===== LISTENING PORT ====="
+          sudo ss -lntp | grep ':4000'
 
       # 11. Deployment complete
       - name: Deployment Complete
         run: |
-          echo "=================================="
+          echo "======================================"
           echo "IEM FedCup Backend Deployed"
-          echo "=================================="
+          echo "======================================"
           echo "Application : iem-fedcup-backend"
           echo "Directory   : /var/www/iem-fedcup-backend"
           echo "Port        : 4000"
+          echo "Node.js     : $(node -v)"
+          echo "PM2         : $(pm2 -v)"
           echo "Process     : PM2"
-          echo "=================================="
+          echo "======================================"
