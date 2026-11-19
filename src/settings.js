@@ -212,6 +212,7 @@ function cleanAudio(a) {
     voiceGender: a.voiceGender === 'female' ? 'female' : 'male',
     voiceAccent: ['in', 'gb', 'us', 'au', 'auto'].includes(a.voiceAccent) ? a.voiceAccent : d.voiceAccent,
     screenSfx: flag('screenSfx'),
+    soundCheck: Number.isFinite(Number(a.soundCheck)) ? Math.max(0, Math.floor(Number(a.soundCheck))) : 0,
     voiceRate: pct(a.voiceRate, 'Voice speed', d.voiceRate, 60, 140),
     callBids: ['every', 'leader', 'off'].includes(a.callBids) ? a.callBids : d.callBids,
     goingOnceTwice: flag('goingOnceTwice'),
@@ -256,7 +257,7 @@ export const SECTION_CLEANERS = {
 };
 
 /** Music slots the admin can upload: intro (auction start), bed (background loop), sold (sting). */
-export const AUDIO_SLOTS = ['intro', 'bed', 'sold', 'bid', 'newPlayer', 'hammer', 'record', 'unsold', 'end', 'screens'];
+export const AUDIO_SLOTS = ['intro', 'bed', 'sold', 'bid', 'newPlayer', 'hammer', 'record', 'unsold', 'end', 'screens', 'screensRetained', 'screensTop', 'screensReplay', 'screensTeams'];
 
 /* ------------------------------ access ------------------------------ */
 
