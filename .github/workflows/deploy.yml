@@ -1,0 +1,153 @@
+
+name: Deploy IEM FedCup Backend
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and Deploy Backend
+    runs-on: self-hosted
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js 22 and npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 3. Install PM2 if missing
+      - name: Install PM2
+        run: |
+          if ! command -v pm2 >/dev/null 2>&1; then
+            echo "Installing PM2..."
+            npm install -g pm2
+          else
+            echo "PM2 already installed"
+          fi
+
+      # 4. Install Nginx if missing
+      - name: Install Nginx
+        run: |
+          if ! command -v nginx >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y nginx
+          else
+            echo "Nginx already installed"
+          fi
+
+      # 5. Stop existing application
+      - name: Stop Existing Backend
+        run: |
+          pm2 delete iem-fedcup-backend || true
+
+      # 6. Clean deployment directory
+      - name: Clean Deployment Directory
+        run: |
+          sudo rm -rf /var/www/iem-fedcup-backend
+          sudo mkdir -p /var/www/iem-fedcup-backend
+          sudo chown "$USER":"$(id -gn)" /var/www/iem-fedcup-backend
+
+      # 7. Copy latest source code
+      - name: Deploy Source Code
+        run: |
+          cp -a "$GITHUB_WORKSPACE/." /var/www/iem-fedcup-backend/
+
+      # 8. Install production dependencies
+      - name: Install Dependencies
+        working-directory: /var/www/iem-fedcup-backend
+        run: npm ci --omit=dev
+
+      # 9. Start backend with GitHub Secrets
+      - name: Start Backend
+        working-directory: /var/www/iem-fedcup-backend
+        env:
+          NODE_ENV: production
+          PORT: 4000
+
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MASTER_KEY: ${{ secrets.MASTER_KEY }}
+
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+
+        run: |
+          pm2 start npm \
+            --name iem-fedcup-backend \
+            -- start
+
+          pm2 save
+
+      # 10. Configure Nginx reverse proxy
+      - name: Configure Nginx
+        run: |
+          sudo tee /etc/nginx/sites-available/iem-fedcup-backend > /dev/null <<'EOF'
+          server {
+              listen 80;
+              listen [::]:80;
+
+              server_name api.example.com;
+
+              client_max_body_size 50M;
+
+              location / {
+                  proxy_pass http://127.0.0.1:4000;
+
+                  proxy_http_version 1.1;
+
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+
+                  # Socket.IO WebSocket support
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+
+                  proxy_read_timeout 3600s;
+                  proxy_send_timeout 3600s;
+          }
+          }
+          EOF
+
+          sudo ln -sfn \
+            /etc/nginx/sites-available/iem-fedcup-backend \
+            /etc/nginx/sites-enabled/iem-fedcup-backend
+
+      # 11. Validate and restart Nginx
+      - name: Reload Nginx
+        run: |
+          sudo nginx -t
+          sudo systemctl enable nginx
+          sudo systemctl restart nginx
+
+      # 12. Verify deployment
+      - name: Deployment Status
+        run: |
+          echo "Backend deployment completed"
+
+          node --version
+          npm --version
+          pm2 --version
+
+          pm2 status
+
+          echo "Backend directory: /var/www/iem-fedcup-backend"
+          echo "Backend port: 4000"
