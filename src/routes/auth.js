@@ -7,19 +7,31 @@ import { config } from '../config.js';
 import { signToken } from '../lib/auth.js';
 import { decrypt, safeEqual } from '../lib/crypto.js';
 import { getSettingsDoc } from '../settings.js';
+import { ipKey } from '../lib/net.js';
 
 const router = Router();
 const h = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-const loginLimiter = rateLimit({
+// Per visitor (real IP behind Cloudflare). Captain attempts are also split by team, so one
+// team's typos on the venue Wi-Fi can never lock the other captains out.
+const adminLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  keyGenerator: ipKey,
+  message: { error: 'TOO_MANY_ATTEMPTS' },
+});
+const captainLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 15,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `${ipKey(req)}:${String(req.body?.teamId || '').slice(0, 24)}`,
   message: { error: 'TOO_MANY_ATTEMPTS' },
 });
 
-router.post('/admin', loginLimiter, h(async (req, res) => {
+router.post('/admin', adminLimiter, h(async (req, res) => {
   const password = String(req.body?.password || '');
   if (!password) return res.status(400).json({ error: 'PASSWORD_REQUIRED' });
   const s = await getSettingsDoc();
@@ -34,7 +46,7 @@ router.post('/admin', loginLimiter, h(async (req, res) => {
   });
 }));
 
-router.post('/captain', loginLimiter, h(async (req, res) => {
+router.post('/captain', captainLimiter, h(async (req, res) => {
   const { teamId } = req.body || {};
   const password = String(req.body?.password || '').trim();
   if (!mongoose.isValidObjectId(teamId) || !password) return res.status(400).json({ error: 'TEAM_AND_PASSWORD_REQUIRED' });

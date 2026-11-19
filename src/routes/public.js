@@ -5,6 +5,7 @@ import { auctionService, fitOut } from '../auction/service.js';
 import { urlFor } from '../integrations/storage.js';
 import { getSettingsDoc } from '../settings.js';
 import { decrypt, safeEqual } from '../lib/crypto.js';
+import { ipKey } from '../lib/net.js';
 
 const router = Router();
 const h = (fn) => (req, res, next) => fn(req, res, next).catch(next);
@@ -41,7 +42,9 @@ router.get('/teams', h(async (req, res) => {
 
 /* ------------------------- player portal (search) ------------------------ */
 
-const portalLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
+const portalLimiter = rateLimit({
+  windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: ipKey,
+});
 
 const portalGate = h(async (req, res, next) => {
   const mode = auctionService.sections.portal.mode;

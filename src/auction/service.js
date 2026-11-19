@@ -193,7 +193,7 @@ export class AuctionService {
   /* ------------------------------ actions ----------------------------- */
 
   adminAction(name, args = {}) {
-    const fn = ADMIN_ACTIONS[name];
+    const fn = typeof name === 'string' && Object.hasOwn(ADMIN_ACTIONS, name) ? ADMIN_ACTIONS[name] : null;
     if (!fn) return { ok: false, code: 'UNKNOWN_ACTION' };
     return this.#run(() => fn(this.engine, args), { actor: 'admin', action: name, args });
   }
@@ -204,7 +204,7 @@ export class AuctionService {
         teamId, amount: Number(amount), lotSeq: Number(lotSeq), source: 'captain',
       }),
       {
-        actor: `captain:${teamId}`, action: 'bid', args: { lotSeq, amount }, logRejects: true,
+        actor: `captain:${teamId}`, action: 'bid', args: { lotSeq: Number(lotSeq) || null, amount: Number(amount) || null }, logRejects: true,
       },
     );
   }

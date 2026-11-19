@@ -39,12 +39,25 @@ export function createSocketServer(httpServer, service, corsOrigins) {
 
     socket.emit('state', service.stateFor(view));
 
+    // Cheap per-socket throttles so one misbehaving client cannot make the server rebuild
+    // the full state thousands of times a second.
+    // Real screens send a few clock syncs on connect and rare resyncs; floods are dropped.
+    const allow = (() => {
+      const hits = {};
+      return (key, max, windowMs) => {
+        const now = Date.now();
+        const h = hits[key] && now - hits[key].start < windowMs ? hits[key] : (hits[key] = { start: now, n: 0 });
+        h.n += 1;
+        return h.n <= max;
+      };
+    })();
+
     socket.on('sync', (_payload, ack) => {
-      if (typeof ack === 'function') ack(Date.now());
+      if (typeof ack === 'function' && allow('sync', 20, 5000)) ack(Date.now());
     });
 
     socket.on('state:get', (_payload, ack) => {
-      if (typeof ack === 'function') ack(service.stateFor(view));
+      if (typeof ack === 'function' && allow('state', 10, 5000)) ack(service.stateFor(view));
     });
 
     if (role === 'captain') {
