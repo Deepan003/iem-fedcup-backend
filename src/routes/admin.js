@@ -15,7 +15,7 @@ import { auctionService, fitOut } from '../auction/service.js';
 import { isOpenPhase } from '../auction/engine.js';
 import { config } from '../config.js';
 import {
-  getSettingsDoc, resolveSections, SECTION_CLEANERS, ValidationError,
+  AUDIO_SLOTS, getSettingsDoc, resolveSections, SECTION_CLEANERS, ValidationError,
 } from '../settings.js';
 import {
   googleClient, parseServiceAccount, parseSheetId, listTabs, readSheet, explainGoogleError,
@@ -53,6 +53,59 @@ router.put('/settings/:section', h(async (req, res) => {
   await AuditLog.create({ type: 'settings', actor: 'admin', data: { section: req.params.section } });
   await auctionService.reload();
   return res.json(value);
+}));
+
+/* ------------------------------- music -------------------------------- */
+
+const AUDIO_TYPES = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/aac': 'aac',
+  'audio/ogg': 'ogg',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+};
+const AUDIO_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Upload a music track: intro (auction start), bed (background loop) or sold (sting on every sale). */
+router.post('/audio/:slot', upload.single('file'), h(async (req, res) => {
+  const { slot } = req.params;
+  if (!AUDIO_SLOTS.includes(slot)) return res.status(404).json({ error: 'UNKNOWN_SLOT' });
+  if (!req.file) throw new ValidationError('Choose an audio file');
+  const byName = /\.(mp3|m4a|aac|ogg|wav|webm)$/i.exec(req.file.originalname || '')?.[1]?.toLowerCase();
+  const ext = AUDIO_TYPES[req.file.mimetype] || byName;
+  if (!ext) throw new ValidationError('Use an MP3, M4A, AAC, OGG or WAV file');
+  if (req.file.size > AUDIO_MAX_BYTES) throw new ValidationError('Audio files must be under 10 MB (trim the track or export at 128 kbps)');
+  const hash = crypto.createHash('sha1').update(req.file.buffer).digest('hex').slice(0, 10);
+  const type = req.file.mimetype?.startsWith('audio/') ? req.file.mimetype : `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+  const key = await putObject(`audio/${slot}-${hash}.${ext}`, req.file.buffer, type);
+  const doc = await getSettingsDoc();
+  const prev = doc.audioTracks?.[slot]?.key;
+  if (prev && prev !== key) await deleteObject(prev).catch(() => {});
+  doc.audioTracks = { ...(doc.audioTracks || {}), [slot]: { key, name: String(req.file.originalname || slot).slice(0, 120), bytes: req.file.size } };
+  doc.markModified('audioTracks');
+  await doc.save();
+  await AuditLog.create({ type: 'audio', actor: 'admin', data: { slot, name: req.file.originalname } });
+  await auctionService.reload();
+  return res.json({ ok: true, slot, url: urlFor(key) });
+}));
+
+router.delete('/audio/:slot', h(async (req, res) => {
+  const { slot } = req.params;
+  if (!AUDIO_SLOTS.includes(slot)) return res.status(404).json({ error: 'UNKNOWN_SLOT' });
+  const doc = await getSettingsDoc();
+  const prev = doc.audioTracks?.[slot]?.key;
+  if (prev) await deleteObject(prev).catch(() => {});
+  const next = { ...(doc.audioTracks || {}) };
+  delete next[slot];
+  doc.audioTracks = next;
+  doc.markModified('audioTracks');
+  await doc.save();
+  await auctionService.reload();
+  return res.json({ ok: true });
 }));
 
 router.put('/portal-code', h(async (req, res) => {

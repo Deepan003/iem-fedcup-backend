@@ -76,6 +76,9 @@ const SettingsSchema = new Schema(
     captainView: { type: Mixed, default: {} },
     studio: { type: Mixed, default: {} },
     portal: { type: Mixed, default: {} },
+    audio: { type: Mixed, default: {} },
+    // Uploaded music: { intro|bed|sold: { key, name, bytes } }. Kept apart so saving settings never drops them.
+    audioTracks: { type: Mixed, default: {} },
     integrations: {
       googleEnc: { type: String, default: '' },
       r2Enc: { type: String, default: '' },

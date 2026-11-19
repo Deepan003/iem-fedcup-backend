@@ -59,6 +59,21 @@ export const DEFAULTS = {
   portal: {
     mode: 'public', // public | code | off
   },
+  audio: {
+    enabled: true, // master switch for every screen
+    studioSound: true, // studio / projector plays sound
+    captainSound: true, // captains hear bids, timer and outbid alerts
+    voice: true, // announcer voice
+    voiceGender: 'male', // male | female
+    voiceRate: 100, // % speaking speed
+    callBids: 'every', // every | leader | off
+    goingOnceTwice: true,
+    music: true,
+    crowd: true, // stadium crowd ambience and cheers
+    sfxVolume: 80,
+    musicVolume: 45,
+    voiceVolume: 100,
+  },
 };
 
 /* ---------------------------- validation ---------------------------- */
@@ -165,12 +180,37 @@ function cleanPortal(p) {
   return { mode };
 }
 
+function cleanAudio(a) {
+  const d = DEFAULTS.audio;
+  const pct = (v, name, def, min = 0, max = 100) => (v === undefined || v === '' ? def : int(v, name, { min, max }));
+  const flag = (k) => (a[k] === undefined ? d[k] : bool(a[k]));
+  return {
+    enabled: flag('enabled'),
+    studioSound: flag('studioSound'),
+    captainSound: flag('captainSound'),
+    voice: flag('voice'),
+    voiceGender: a.voiceGender === 'female' ? 'female' : 'male',
+    voiceRate: pct(a.voiceRate, 'Voice speed', d.voiceRate, 60, 140),
+    callBids: ['every', 'leader', 'off'].includes(a.callBids) ? a.callBids : d.callBids,
+    goingOnceTwice: flag('goingOnceTwice'),
+    music: flag('music'),
+    crowd: flag('crowd'),
+    sfxVolume: pct(a.sfxVolume, 'Effects volume', d.sfxVolume),
+    musicVolume: pct(a.musicVolume, 'Music volume', d.musicVolume),
+    voiceVolume: pct(a.voiceVolume, 'Voice volume', d.voiceVolume),
+  };
+}
+
 export const SECTION_CLEANERS = {
   auction: cleanAuction,
   captainView: cleanCaptainView,
   studio: cleanStudio,
   portal: cleanPortal,
+  audio: cleanAudio,
 };
+
+/** Music slots the admin can upload: intro (auction start), bed (background loop), sold (sting). */
+export const AUDIO_SLOTS = ['intro', 'bed', 'sold'];
 
 /* ------------------------------ access ------------------------------ */
 

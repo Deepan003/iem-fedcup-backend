@@ -120,6 +120,7 @@ export class AuctionService {
   async #load() {
     const doc = await getSettingsDoc();
     const sections = resolveSections(doc.toObject());
+    sections.audioTracks = doc.audioTracks || {};
     const [teams, players] = await Promise.all([
       Team.find().sort({ order: 1, name: 1 }).lean(),
       Player.find().lean(),
@@ -502,6 +503,7 @@ export class AuctionService {
       studio: {
         title: sv.title, subtitle: sv.subtitle, live: sv.live, startsAt: sv.startsAt,
       },
+      audio: this.audioState(),
     };
 
     if (isCaptain) {
@@ -530,6 +532,16 @@ export class AuctionService {
     for (const id of this.engine.teams.keys()) {
       this.io.to(`team:${id}`).emit('bid', hidden ? { ...msg, lot: { ...lot, history: [] } } : msg);
     }
+  }
+
+  /** Sound settings plus playable URLs of uploaded music, for every screen. */
+  audioState() {
+    const a = this.sections?.audio || {};
+    const tracks = {};
+    for (const [slot, t] of Object.entries(this.sections?.audioTracks || {})) {
+      if (t?.key) tracks[slot] = { url: urlFor(t.key), name: t.name || slot };
+    }
+    return { ...a, tracks };
   }
 
   /** Tell every open screen that admin data changed (no auction-state reload needed). */
