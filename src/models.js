@@ -64,6 +64,7 @@ const TeamSchema = new Schema(
       formation: { type: String, default: '4-4-2' },
       lineup: { type: Mixed, default: {} }, // slotId -> playerId
       watchlist: { type: [{ playerId: String, maxPrice: Number, note: String }], default: [] },
+      manual: { type: Boolean, default: false }, // lineup arranged by hand (don't auto-fill)
     },
   },
   { timestamps: true },

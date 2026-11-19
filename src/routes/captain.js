@@ -8,7 +8,11 @@ const h = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 router.use(requireCaptain);
 
-const FORMATIONS = ['4-4-2', '4-3-3', '3-5-2', '4-2-3-1', '3-4-3', '5-3-2', '4-1-4-1', '5-4-1'];
+const FORMATIONS = [
+  '4-4-2', '4-3-3', '4-2-3-1', '4-5-1', '4-4-1-1', '4-1-4-1', '4-1-2-1-2', '4-2-2-2', '4-3-2-1', '3-5-2', '3-4-3', '3-4-1-2', '3-4-2-1', '5-3-2', '5-4-1', '5-2-3',
+  '3-3-2', '3-4-1', '4-3-1', '3-2-3', // 9-a-side
+  '2-3-1', '3-2-1', '3-1-2', '2-2-2', // 7-a-side
+];
 
 /** The captain's private squad plan (formation, lineup, watchlist). */
 router.get('/plan', h(async (req, res) => {
@@ -32,7 +36,8 @@ router.put('/plan', h(async (req, res) => {
     maxPrice: Number.isFinite(Number(w.maxPrice)) ? Math.max(0, Math.round(Number(w.maxPrice))) : null,
     note: String(w.note || '').slice(0, 200),
   })).filter((w) => w.playerId);
-  await Team.updateOne({ _id: req.session.teamId }, { $set: { plan: { formation, lineup, watchlist } } });
+  const manual = body.manual === true; // lineup set by hand (no auto-fill)
+  await Team.updateOne({ _id: req.session.teamId }, { $set: { plan: { formation, lineup, watchlist, manual } } });
   res.json({ ok: true });
 }));
 
