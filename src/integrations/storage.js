@@ -1,5 +1,5 @@
 import {
-  S3Client, PutObjectCommand, DeleteObjectCommand, HeadBucketCommand,
+  S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand,
 } from '@aws-sdk/client-s3';
 import { Media } from '../models.js';
 
@@ -62,6 +62,19 @@ export async function deleteObject(key) {
 }
 
 /** Public URL for a stored key. Database-backed URLs are relative to the API origin. */
+/** Read a stored object back (admin tools, e.g. re-framing a photo). Returns { body, type } or null. */
+export async function getObject(key) {
+  if (!key) return null;
+  if (key.startsWith('db/')) {
+    const doc = await Media.findById(key).lean();
+    if (!doc) return null;
+    return { body: doc.data?.buffer ? Buffer.from(doc.data.buffer) : Buffer.from(doc.data), type: doc.contentType };
+  }
+  if (!r2) return null;
+  const out = await r2.client.send(new GetObjectCommand({ Bucket: r2.bucket, Key: key }));
+  return { body: Buffer.from(await out.Body.transformToByteArray()), type: out.ContentType || 'image/webp' };
+}
+
 export function urlFor(key) {
   if (!key) return null;
   if (key.startsWith('db/')) return `/api/media/${key}`;

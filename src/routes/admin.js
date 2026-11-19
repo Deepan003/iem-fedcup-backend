@@ -21,7 +21,7 @@ import {
   googleClient, parseServiceAccount, parseSheetId, listTabs, readSheet, explainGoogleError,
 } from '../integrations/google.js';
 import {
-  configureStorage, deleteObject, isCompleteR2, putObject, storageMode, testR2, urlFor,
+  configureStorage, deleteObject, getObject, isCompleteR2, putObject, storageMode, testR2, urlFor,
 } from '../integrations/storage.js';
 import {
   parseRows, previewImport, commitImport, startPhotoSync, photoJobStatus, retryPlayerPhoto,
@@ -750,6 +750,17 @@ router.delete('/players/:id', h(async (req, res) => {
   await deleteObject(p.thumbKey);
   await auctionService.reload();
   return res.json({ ok: true });
+}));
+
+/** The stored full-size photo, so the admin can re-frame it in the browser (R2 links cannot be read cross-origin). */
+router.get('/players/:id/photo/source', h(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const p = await Player.findById(req.params.id, { photoKey: 1 }).lean();
+  const obj = p?.photoKey ? await getObject(p.photoKey).catch(() => null) : null;
+  if (!obj) return res.status(404).json({ error: 'NO_PHOTO' });
+  res.set('Content-Type', obj.type || 'image/webp');
+  res.set('Cache-Control', 'private, no-store');
+  return res.send(obj.body);
 }));
 
 router.post('/players/:id/photo', upload.single('file'), h(async (req, res) => {
