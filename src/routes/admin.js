@@ -852,6 +852,21 @@ router.post('/players/shuffle', h(async (req, res) => {
   res.json({ shuffled: ops.length });
 }));
 
+/** Manual queue order within one position (the /shuffle5 page): ids in the order they should come up. */
+router.post('/players/order', h(async (req, res) => {
+  const position = POSITIONS.includes(req.body?.position) ? req.body.position : null;
+  if (!position) throw new ValidationError('Pick a position');
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter((id) => /^[a-f0-9]{24}$/i.test(id)).slice(0, 2000) : [];
+  if (!ids.length) throw new ValidationError('Nothing to order');
+  const ops = ids.map((id, i) => ({
+    updateOne: { filter: { _id: id, position, status: 'available' }, update: { $set: { order: (i + 1) * 10 } } },
+  }));
+  const r = await Player.bulkWrite(ops);
+  await AuditLog.create({ type: 'reorder', actor: 'admin', data: { position, count: ids.length } });
+  await auctionService.reload();
+  res.json({ ordered: r.modifiedCount ?? ids.length });
+}));
+
 /* --------------------------------- auction -------------------------------- */
 
 router.post('/auction/reset', h(async (req, res) => {
