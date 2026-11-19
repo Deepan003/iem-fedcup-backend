@@ -47,6 +47,7 @@ router.put('/settings/:section', h(async (req, res) => {
   if (!clean) return res.status(404).json({ error: 'UNKNOWN_SECTION' });
   const value = clean(req.body || {});
   const doc = await getSettingsDoc();
+  if (req.params.section === 'auction') value.decimals = resolveSections(doc.toObject()).auction.decimals || 0;
   doc.set(req.params.section, value);
   doc.markModified(req.params.section);
   await doc.save();
@@ -106,6 +107,59 @@ router.delete('/audio/:slot', h(async (req, res) => {
   await doc.save();
   await auctionService.reload();
   return res.json({ ok: true });
+}));
+
+/**
+ * Change money decimal places (0, 1 or 2) and rescale every stored amount so values keep their
+ * meaning (e.g. budget 100 → 1000 internal units when going from 0 to 1 decimal). Only before any
+ * sale, and never while a player is on the block.
+ */
+router.post('/money/decimals', h(async (req, res) => {
+  const next = Number(req.body?.decimals);
+  if (![0, 1, 2].includes(next)) throw new ValidationError('Decimal places must be 0, 1 or 2');
+  const doc = await getSettingsDoc();
+  const sections = resolveSections(doc.toObject());
+  const prev = sections.auction.decimals || 0;
+  if (next === prev) return res.json({ ok: true, decimals: prev, changed: false });
+  if (await Player.exists({ status: 'sold' })) {
+    throw new ValidationError('Players have already been sold. Change decimal places before the auction (or reset the auction first).');
+  }
+  const lot = auctionService.engine.state.lot;
+  if (lot && isOpenPhase(lot.phase)) throw new ValidationError('A player is on the block. Finish or withdraw the lot first.');
+
+  const f = 10 ** (next - prev);
+  const sc = (n, min = 0) => (n == null || n === '' ? n : Math.max(min, Math.round(Number(n) * f)));
+  const a = sections.auction;
+  doc.set('auction', {
+    ...a,
+    decimals: next,
+    teamBudget: sc(a.teamBudget, 1),
+    defaultBasePrice: sc(a.defaultBasePrice, 1),
+    reservePerSlot: sc(a.reservePerSlot),
+    tiers: a.tiers.map((t) => ({ ...t, basePrice: sc(t.basePrice, 1) })),
+    increments: a.increments.map((s) => ({ upTo: s.upTo == null ? null : sc(s.upTo, 1), step: sc(s.step, 1) })),
+  });
+  doc.markModified('auction');
+  await doc.save();
+
+  const teams = await Team.find({}, { budget: 1, penalties: 1, plan: 1 });
+  for (const t of teams) {
+    if (t.budget != null) t.budget = sc(t.budget, 0);
+    for (const p of t.penalties || []) p.amount = sc(p.amount, 1);
+    for (const w of t.plan?.watchlist || []) if (w.maxPrice != null) w.maxPrice = sc(w.maxPrice, 0);
+    t.markModified('plan');
+    // eslint-disable-next-line no-await-in-loop
+    await t.save();
+  }
+  const players = await Player.find({ $or: [{ basePrice: { $ne: null } }, { price: { $ne: null } }] }, { basePrice: 1, price: 1 }).lean();
+  if (players.length) {
+    await Player.bulkWrite(players.map((p) => ({
+      updateOne: { filter: { _id: p._id }, update: { $set: { basePrice: p.basePrice == null ? null : sc(p.basePrice, 1), price: p.price == null ? null : sc(p.price, 0) } } },
+    })));
+  }
+  await AuditLog.create({ type: 'settings', actor: 'admin', data: { decimals: { from: prev, to: next } } });
+  await auctionService.reload();
+  return res.json({ ok: true, decimals: next, changed: true });
 }));
 
 router.put('/portal-code', h(async (req, res) => {
@@ -821,6 +875,8 @@ router.get('/export.xlsx', h(async (req, res) => {
   const ExcelJS = (await import('exceljs')).default;
   const [players, teams, doc] = await Promise.all([Player.find().sort({ position: 1, name: 1 }).lean(), Team.find().sort({ order: 1, name: 1 }).lean(), getSettingsDoc()]);
   const { auction } = resolveSections(doc.toObject());
+  const unit = 10 ** (auction.decimals || 0);
+  const M = (n) => (n == null || n === '' ? n : Number(n) / unit); // stored units → real amount
   const wb = new ExcelJS.Workbook();
   wb.creator = 'IEM FED Cup';
   const head = (ws, color = 'FF0B0B0C') => {
@@ -838,21 +894,21 @@ router.get('/export.xlsx', h(async (req, res) => {
     const budget = t.budget ?? auction.teamBudget;
     const pen = (t.penalties || []).reduce((s, p) => s + (p.amount || 0), 0);
     sum.addRow({
-      team: t.name, cap: t.captainName, n: squad.length, budget, spent, pen, left: budget - spent - pen,
+      team: t.name, cap: t.captainName, n: squad.length, budget: M(budget), spent: M(spent), pen: M(pen), left: M(budget - spent - pen),
     });
     const ws = wb.addWorksheet(t.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
     ws.columns = [{ header: '#', key: 'i', width: 5 }, { header: 'Name', key: 'name', width: 26 }, { header: 'Position', key: 'pos', width: 13 }, { header: 'Department', key: 'dept', width: 16 }, { header: 'Year', key: 'year', width: 10 }, { header: 'Role', key: 'role', width: 11 }, { header: 'Price', key: 'price', width: 10 }];
     head(ws, `FF${(t.color || '#0b0b0c').replace('#', '').toUpperCase()}`);
     squad.sort((a, b) => (b.isCaptain - a.isCaptain) || ((b.price || 0) - (a.price || 0)));
-    squad.forEach((p, i) => ws.addRow({ i: i + 1, name: p.name, pos: p.position, dept: p.department, year: p.year, role: role(p), price: p.price || 0 }));
-    const total = ws.addRow({ name: 'Total', price: spent });
+    squad.forEach((p, i) => ws.addRow({ i: i + 1, name: p.name, pos: p.position, dept: p.department, year: p.year, role: role(p), price: M(p.price || 0) }));
+    const total = ws.addRow({ name: 'Total', price: M(spent) });
     total.font = { bold: true };
   }
   const all = wb.addWorksheet('All players');
   all.columns = [{ header: 'Name', key: 'name', width: 26 }, { header: 'Position', key: 'pos', width: 13 }, { header: 'Department', key: 'dept', width: 16 }, { header: 'Year', key: 'year', width: 10 }, { header: 'Tier', key: 'tier', width: 10 }, { header: 'Status', key: 'status', width: 11 }, { header: 'Team', key: 'team', width: 24 }, { header: 'Price', key: 'price', width: 10 }];
   head(all);
   const teamName = new Map(teams.map((t) => [String(t._id), t.name]));
-  for (const p of players) all.addRow({ name: p.name, pos: p.position, dept: p.department, year: p.year, tier: p.tier, status: p.isCaptain ? 'captain' : p.status, team: p.teamId ? teamName.get(String(p.teamId)) : '', price: p.price ?? '' });
+  for (const p of players) all.addRow({ name: p.name, pos: p.position, dept: p.department, year: p.year, tier: p.tier, status: p.isCaptain ? 'captain' : p.status, team: p.teamId ? teamName.get(String(p.teamId)) : '', price: p.price == null ? '' : M(p.price) });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="fedcup-auction-${new Date().toISOString().slice(0, 10)}.xlsx"`);
   await wb.xlsx.write(res);

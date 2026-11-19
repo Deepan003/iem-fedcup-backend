@@ -3,6 +3,9 @@ import { Settings, POSITIONS } from './models.js';
 export const DEFAULTS = {
   auction: {
     currency: 'pts',
+    // Decimal places for money (0, 1 or 2). Amounts are stored as whole numbers of the smallest
+    // unit (e.g. 2.1 with 1 decimal is stored as 21), so all auction maths stays exact.
+    decimals: 0,
     teamBudget: 1000,
     defaultBasePrice: 20,
     tiers: [
@@ -101,6 +104,8 @@ const str = (v, max = 200) => String(v ?? '').trim().slice(0, max);
 function cleanAuction(a) {
   const out = {
     currency: str(a.currency, 20) || 'pts',
+    // Only changed through POST /admin/money/decimals (which rescales stored amounts).
+    decimals: [0, 1, 2].includes(Number(a.decimals)) ? Number(a.decimals) : 0,
     teamBudget: int(a.teamBudget, 'Team budget', { min: 1 }),
     defaultBasePrice: int(a.defaultBasePrice, 'Default base price', { min: 1 }),
     tiers: (a.tiers || []).map((t, i) => ({

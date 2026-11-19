@@ -492,6 +492,7 @@ export class AuctionService {
       mode: st.mode,
       round: st.round,
       currency: auction.currency,
+      decimals: auction.decimals || 0,
       timerEnabled: auction.timerEnabled,
       lot: lot && !showHistory ? { ...lot, history: [] } : lot,
       teams,
