@@ -146,11 +146,40 @@ export class AuctionEngine {
     };
   }
 
+  /**
+   * Goalkeepers a team already has: bought or retained players, plus the captain when the captain
+   * is only a name on the team (not a listed player) and was entered as a goalkeeper.
+   */
+  goalkeepers(teamId) {
+    const team = this.teams.get(teamId);
+    const squad = this.squadOf(teamId);
+    let n = squad.filter((p) => p.position === 'Goalkeeper').length;
+    if (team?.captainPosition === 'Goalkeeper' && !squad.some((p) => p.isCaptain)) n += 1;
+    return n;
+  }
+
+  /**
+   * Goalkeeper rule: a team that already has a goalkeeper may not bid for another one while some other
+   * team (that can still buy) has none.
+   */
+  gkRuleBlocks(teamId, player) {
+    if (!this.settings.gkRule || player?.position !== 'Goalkeeper') return false;
+    if (this.goalkeepers(teamId) === 0) return false;
+    for (const id of this.teams.keys()) {
+      if (id === teamId) continue;
+      const t = this.teams.get(id);
+      if (t.frozen || this.goalkeepers(id) > 0) continue;
+      if (this.finance(id).slotsLeft > 0) return true;
+    }
+    return false;
+  }
+
   /** Returns an error code if `teamId` may not buy `player` for `amount`, otherwise null. */
   eligibility(teamId, player, amount) {
     const team = this.teams.get(teamId);
     if (!team) return 'UNKNOWN_TEAM';
     if (team.frozen) return 'TEAM_FROZEN';
+    if (this.gkRuleBlocks(teamId, player)) return 'GK_RULE';
     const s = this.settings;
     const f = this.finance(teamId, player);
     if (f.slotsLeft <= 0) return 'SQUAD_FULL';

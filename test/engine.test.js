@@ -288,3 +288,32 @@ test('tier matching accepts sheet values like "2" or "tier-2" for a tier named "
   assert.equal(engine.basePriceFor({ tier: '3' }), 10); // no such tier: default
   assert.equal(engine.tierOf({ tier: '2' })?.name, 'Tier 2');
 });
+
+test('goalkeeper rule: a team with a keeper (bought, retained or captain) waits until every team has one', () => {
+  const make = (gkRule, extra = []) => new AuctionEngine({
+    settings: { ...settings(), positionLimits: {}, gkRule },
+    teams: [
+      { id: 'A', name: 'Alpha', budget: 200 },
+      { id: 'B', name: 'Bravo', budget: 200 },
+      { id: 'C', name: 'Charlie', budget: 200, captainPosition: 'Goalkeeper' }, // captain is only a name, entered as GK
+    ],
+    players: [
+      { id: 'ra', name: 'Retained Keeper', position: 'Goalkeeper', status: 'retained', teamId: 'A', price: 0 },
+      { id: 'g1', name: 'Keeper One', position: 'Goalkeeper', status: 'available' },
+      { id: 'd1', name: 'Def One', position: 'Defender', status: 'available' },
+      ...extra,
+    ],
+    clock: () => 1,
+  });
+  const e = make(true);
+  const g1 = e.players.get('g1');
+  assert.equal(e.eligibility('A', g1, 10), 'GK_RULE'); // retained keeper counts
+  assert.equal(e.eligibility('C', g1, 10), 'GK_RULE'); // captain entered as goalkeeper counts
+  assert.equal(e.eligibility('B', g1, 10), null); // the team without one may bid
+  assert.equal(e.eligibility('A', e.players.get('d1'), 10), null); // only goalkeepers are affected
+  // once every team has a keeper, anyone may bid again
+  const e2 = make(true, [{ id: 'gb', name: 'Bravo Keeper', position: 'Goalkeeper', status: 'sold', teamId: 'B', price: 20 }]);
+  assert.equal(e2.eligibility('A', e2.players.get('g1'), 10), null);
+  // switched off in the rules
+  assert.equal(make(false).eligibility('A', g1, 10), null);
+});

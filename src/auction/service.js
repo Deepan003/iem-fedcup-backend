@@ -77,6 +77,7 @@ function teamToEngine(t, sections) {
     logoFit: fitOut(t.logoFit),
     captainName: t.captainName || '',
     captainPhotoKey: t.captainPhotoKey || '',
+    captainPosition: t.captainPosition || '',
     budget: t.budget ?? sections.auction.teamBudget,
     penalty: (t.penalties || []).reduce((s, p) => s + (p.amount || 0), 0),
     penalties: (t.penalties || []).map((p) => ({
@@ -443,6 +444,8 @@ export class AuctionService {
           logoFit: t.logoFit,
           captainName: t.captainName,
           captainPhotoUrl: urlFor(t.captainPhotoKey),
+          captainPosition: t.captainPosition || '',
+          goalkeepers: e.goalkeepers(t.id),
           frozen: t.frozen,
           count: f.count,
         };

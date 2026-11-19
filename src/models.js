@@ -49,6 +49,7 @@ const TeamSchema = new Schema(
     },
     captainName: { type: String, default: '' },
     captainPhotoKey: { type: String, default: '' },
+    captainPosition: { type: String, default: '' }, // counts for position rules when the captain isn't a listed player
     budget: { type: Number, default: null }, // null = use the global team budget
     // Disciplinary deductions from the purse, each with a reason.
     penalties: {

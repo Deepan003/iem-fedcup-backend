@@ -24,6 +24,15 @@ router.get('/plan', h(async (req, res) => {
   });
 }));
 
+/** The whole player pool for captains (works even when the public players page is closed). */
+router.get('/pool', (req, res) => {
+  const e = auctionService.engine;
+  res.set('Cache-Control', 'private, max-age=10');
+  res.json([...e.players.values()]
+    .filter((p) => p.status !== 'withheld')
+    .map((p) => ({ ...auctionService.publicPlayer(p), teamId: p.teamId, price: ['sold', 'retained'].includes(p.status) ? p.price : null })));
+});
+
 router.put('/plan', h(async (req, res) => {
   const body = req.body || {};
   const formation = FORMATIONS.includes(body.formation) ? body.formation : '4-4-2';

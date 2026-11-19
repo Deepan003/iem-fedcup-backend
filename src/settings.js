@@ -36,6 +36,7 @@ export const DEFAULTS = {
     bidSec: 15,
     graceMs: 400,
     requireConfirm: true, // a sale is final only when the auctioneer clicks Confirm
+    gkRule: true, // a team that has a goalkeeper can't bid for another until every team has one
     resumeMinSec: 5,
   },
   captainView: {
@@ -145,6 +146,7 @@ function cleanAuction(a) {
     bidSec: int(a.bidSec, 'Bid timer', { min: 3, max: 600 }),
     graceMs: int(a.graceMs, 'Grace window', { min: 0, max: 3000 }),
     requireConfirm: a.requireConfirm === undefined ? true : bool(a.requireConfirm),
+    gkRule: a.gkRule === undefined ? true : bool(a.gkRule),
     resumeMinSec: int(a.resumeMinSec, 'Minimum time after resume', { min: 0, max: 120 }),
   };
   if (out.minSquadSize > out.maxSquadSize) bad('Minimum squad size cannot exceed the maximum');
@@ -294,5 +296,6 @@ export function toEngineSettings({ auction, captainView }) {
     requireConfirm: auction.requireConfirm,
     resumeMinMs: auction.resumeMinSec * 1000,
     captainBiddingEnabled: captainView.biddingEnabled,
+    gkRule: auction.gkRule !== false,
   };
 }

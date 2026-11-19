@@ -477,6 +477,7 @@ function teamOut(t) {
     logoFit: fitOut(t.logoFit),
     captainName: t.captainName,
     captainPhotoUrl: urlFor(t.captainPhotoKey),
+    captainPosition: t.captainPosition || '',
     budget: t.budget,
     penalties: (t.penalties || []).map((p) => ({
       id: String(p._id), amount: p.amount, remark: p.remark || '', at: p.at,
@@ -499,6 +500,7 @@ function cleanTeam(b, partial = false) {
     out.color = b.color;
   }
   if (b.captainName !== undefined) out.captainName = String(b.captainName).trim().slice(0, 60);
+  if (b.captainPosition !== undefined) out.captainPosition = POSITIONS.includes(b.captainPosition) ? b.captainPosition : '';
   if (b.budget !== undefined) {
     if (b.budget === null || b.budget === '') out.budget = null;
     else {
