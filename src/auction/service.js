@@ -487,6 +487,24 @@ export class AuctionService {
           playerId: p.id, name: p.name, teamId: p.teamId, price: p.price, thumbUrl: urlFor(p.thumbKey) || urlFor(p.photoKey),
         })),
     };
+    // Auction pool progress ("x of y defenders left") and the top 3 buys per position (for announcements).
+    const pool = all.filter((p) => ['available', 'sold', 'unsold'].includes(p.status));
+    stats.pool = { total: pool.length, left: pool.filter((p) => p.status === 'available').length };
+    stats.byPosition = {};
+    stats.topByPosition = {};
+    for (const p of pool) {
+      const b = stats.byPosition[p.position] || (stats.byPosition[p.position] = {
+        total: 0, left: 0, sold: 0, unsold: 0,
+      });
+      b.total += 1;
+      if (p.status === 'available') b.left += 1;
+      else if (p.status === 'sold') b.sold += 1;
+      else b.unsold += 1;
+    }
+    for (const p of [...sold].sort((a, b) => b.price - a.price)) {
+      const list = stats.topByPosition[p.position] || (stats.topByPosition[p.position] = []);
+      if (list.length < 3) list.push({ playerId: p.id, name: p.name, teamId: p.teamId, price: p.price });
+    }
     // Record holders for live broadcast indicators (overall, per position, per tier).
     stats.records = { overall: null, byPosition: {}, byTier: {} };
     for (const p of sold) {
