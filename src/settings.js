@@ -80,6 +80,8 @@ export const DEFAULTS = {
     captainSound: true, // captains hear bids, timer and outbid alerts
     voice: true, // announcer voice
     voiceGender: 'male', // male | female
+    voiceAccent: 'in', // in | gb | us | au | auto
+    screenSfx: true, // effects and music on the studio screensavers
     voiceRate: 100, // % speaking speed
     callBids: 'every', // every | leader | off
     goingOnceTwice: true,
@@ -208,6 +210,8 @@ function cleanAudio(a) {
     captainSound: flag('captainSound'),
     voice: flag('voice'),
     voiceGender: a.voiceGender === 'female' ? 'female' : 'male',
+    voiceAccent: ['in', 'gb', 'us', 'au', 'auto'].includes(a.voiceAccent) ? a.voiceAccent : d.voiceAccent,
+    screenSfx: flag('screenSfx'),
     voiceRate: pct(a.voiceRate, 'Voice speed', d.voiceRate, 60, 140),
     callBids: ['every', 'leader', 'off'].includes(a.callBids) ? a.callBids : d.callBids,
     goingOnceTwice: flag('goingOnceTwice'),
@@ -252,7 +256,7 @@ export const SECTION_CLEANERS = {
 };
 
 /** Music slots the admin can upload: intro (auction start), bed (background loop), sold (sting). */
-export const AUDIO_SLOTS = ['intro', 'bed', 'sold', 'bid', 'newPlayer', 'hammer', 'record', 'unsold', 'end'];
+export const AUDIO_SLOTS = ['intro', 'bed', 'sold', 'bid', 'newPlayer', 'hammer', 'record', 'unsold', 'end', 'screens'];
 
 /* ------------------------------ access ------------------------------ */
 

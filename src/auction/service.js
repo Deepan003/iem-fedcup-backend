@@ -483,7 +483,9 @@ export class AuctionService {
       retained: all.filter((p) => p.status === 'retained').length,
       totalSpent: sold.reduce((s, p) => s + (p.price || 0), 0),
       topBuys: [...sold].sort((a, b) => b.price - a.price).slice(0, 5)
-        .map((p) => ({ playerId: p.id, name: p.name, teamId: p.teamId, price: p.price })),
+        .map((p) => ({
+          playerId: p.id, name: p.name, teamId: p.teamId, price: p.price, thumbUrl: urlFor(p.thumbKey) || urlFor(p.photoKey),
+        })),
     };
     // Record holders for live broadcast indicators (overall, per position, per tier).
     stats.records = { overall: null, byPosition: {}, byTier: {} };
