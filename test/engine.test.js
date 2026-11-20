@@ -317,3 +317,23 @@ test('goalkeeper rule: a team with a keeper (bought, retained or captain) waits 
   // switched off in the rules
   assert.equal(make(false).eligibility('A', g1, 10), null);
 });
+
+test('captain on the team card takes a squad slot: 17 = captain + 2 retained + 14 to buy', () => {
+  const make = (captainInSquad, captainPosition = '') => new AuctionEngine({
+    settings: {
+      ...settings(), minSquadSize: 11, maxSquadSize: 17, positionLimits: { Goalkeeper: { min: 1, max: 2 } }, captainInSquad,
+    },
+    teams: [{ id: 'A', name: 'Alpha', budget: 2000, captainName: 'Cap Tain', captainPosition }],
+    players: [
+      { id: 'r1', name: 'Ret One', position: 'Defender', status: 'retained', teamId: 'A', price: 50 },
+      { id: 'r2', name: 'Ret Two', position: 'Forward', status: 'retained', teamId: 'A', price: 50 },
+    ],
+    clock: () => 1,
+  });
+  const f = make(true).finance('A');
+  assert.equal(f.count, 3);
+  assert.equal(f.slotsLeft, 14);
+  assert.equal(make(false).finance('A').slotsLeft, 15);
+  // a goalkeeper captain fills the goalkeeper minimum and counts toward the position
+  assert.equal(make(true, 'Goalkeeper').finance('A').byPosition.Goalkeeper, 1);
+});

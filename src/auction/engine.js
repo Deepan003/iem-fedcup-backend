@@ -125,10 +125,13 @@ export class AuctionEngine {
     const spent = squad.reduce((sum, p) => sum + (p.price || 0), 0);
     const byPosition = {};
     for (const p of squad) byPosition[p.position] = (byPosition[p.position] || 0) + 1;
+    // A captain who is only a name on the team card still takes a squad slot (and their position).
+    const capSlot = this.captainSlot(teamId, squad);
+    if (capSlot && team.captainPosition) byPosition[team.captainPosition] = (byPosition[team.captainPosition] || 0) + 1;
 
     const penalty = team.penalty || 0;
     const purse = team.budget - spent - penalty;
-    const count = squad.length;
+    const count = squad.length + capSlot;
     const slotsLeft = Math.max(0, s.maxSquadSize - count);
 
     // Simulate owning one more player (the one on the block, or a generic one).
@@ -144,6 +147,13 @@ export class AuctionEngine {
     return {
       purse, spent, penalty, count, slotsLeft, byPosition, maxBid, mustBuyAfter,
     };
+  }
+
+  /** 1 when the team's captain is a name on the team card (not a listed player) and counts in the squad. */
+  captainSlot(teamId, squad = this.squadOf(teamId)) {
+    if (this.settings.captainInSquad === false) return 0;
+    const team = this.teams.get(teamId);
+    return team?.captainName && !squad.some((p) => p.isCaptain) ? 1 : 0;
   }
 
   /**

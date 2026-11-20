@@ -21,7 +21,9 @@ export const DEFAULTS = {
     ],
     positionOrder: ['Defender', 'Midfielder', 'Forward', 'Goalkeeper'],
     minSquadSize: 11,
-    maxSquadSize: 15,
+    maxSquadSize: 17, // whole squad: captain + retained + bought
+    maxRetained: 2, // players a team may retain (captain not counted)
+    captainInSquad: true, // the captain takes one squad slot
     reservePerSlot: 20,
     positionLimits: {
       Goalkeeper: { min: 1, max: 2 },
@@ -137,6 +139,8 @@ function cleanAuction(a) {
     positionOrder: (a.positionOrder || []).filter((p) => POSITIONS.includes(p)),
     minSquadSize: int(a.minSquadSize, 'Minimum squad size', { min: 1, max: 40 }),
     maxSquadSize: int(a.maxSquadSize, 'Maximum squad size', { min: 1, max: 40 }),
+    maxRetained: a.maxRetained == null ? 2 : int(a.maxRetained, 'Max retained players', { min: 0, max: 20 }),
+    captainInSquad: a.captainInSquad === undefined ? true : bool(a.captainInSquad),
     reservePerSlot: int(a.reservePerSlot, 'Reserve per slot', { min: 0 }),
     positionLimits: {},
     timerEnabled: bool(a.timerEnabled),
@@ -297,5 +301,6 @@ export function toEngineSettings({ auction, captainView }) {
     resumeMinMs: auction.resumeMinSec * 1000,
     captainBiddingEnabled: captainView.biddingEnabled,
     gkRule: auction.gkRule !== false,
+    captainInSquad: auction.captainInSquad !== false,
   };
 }

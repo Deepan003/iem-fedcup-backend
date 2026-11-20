@@ -632,6 +632,11 @@ router.post('/teams/:id/retained', h(async (req, res) => {
   const price = isCaptain ? 0 : Number(b.price);
   if (!Number.isInteger(price) || price < 0) throw new ValidationError('Retention price must be a whole number');
   const extra = { department: String(b.department || '').trim().slice(0, 60), isCaptain };
+  if (!isCaptain) {
+    const maxRetained = auctionService.sections.auction.maxRetained ?? 2;
+    const already = await Player.countDocuments({ teamId: team._id, status: 'retained', isCaptain: { $ne: true } });
+    if (already >= maxRetained) throw new ValidationError(`A team can retain at most ${maxRetained} player${maxRetained === 1 ? '' : 's'} (captain not counted). Change it in Settings → Auction rules.`);
+  }
   let player;
   if (b.playerId) {
     if (!mongoose.isValidObjectId(b.playerId)) throw new ValidationError('Unknown player');
@@ -961,14 +966,14 @@ router.get('/report/:kind', h(async (req, res) => {
     rows = bids.map((b) => {
       const p = byId.get(String(b.playerId));
       return {
-        lot: b.lotSeq, round: b.round ?? 1, player: p?.name || '—', position: p?.position || '', team: teamName.get(String(b.teamId)) || '', amount: M(b.amount), source: b.source || '', time: b.at ? new Date(b.at).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' }) : '',
+        photo: urlFor(p?.thumbKey) || urlFor(p?.photoKey) || null, lot: b.lotSeq, round: b.round ?? 1, player: p?.name || '—', position: p?.position || '', team: teamName.get(String(b.teamId)) || '', amount: M(b.amount), source: b.source || '', time: b.at ? new Date(b.at).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' }) : '',
       };
     });
   } else if (kind === 'unsold') {
     columns = [['name', 'Player'], ['position', 'Position'], ['tier', 'Tier'], ['department', 'Department'], ['year', 'Year'], ['base', `Base (${auction.currency})`]];
     rows = players.filter((p) => p.status === 'unsold').sort((a, b) => a.position.localeCompare(b.position) || a.name.localeCompare(b.name))
       .map((p) => ({
-        name: p.name, position: p.position, tier: p.tier || '', department: p.department || '', year: p.year || '', base: M(baseOf(p)),
+        photo: urlFor(p?.thumbKey) || urlFor(p?.photoKey) || null, name: p.name, position: p.position, tier: p.tier || '', department: p.department || '', year: p.year || '', base: M(baseOf(p)),
       }));
   } else {
     // which round each sale happened in: from the winning lot's bids
@@ -981,7 +986,7 @@ router.get('/report/:kind', h(async (req, res) => {
     }).sort((a, b) => (a.lotSeq ?? 0) - (b.lotSeq ?? 0));
     columns = [['lot', 'Lot'], ['name', 'Player'], ['position', 'Position'], ['tier', 'Tier'], ['team', 'Team'], ['price', `Price (${auction.currency})`], ['bids', 'Bids']];
     rows = wanted.map((p) => ({
-      lot: p.lotSeq, name: p.name, position: p.position, tier: p.tier || '', team: teamName.get(String(p.teamId)) || '', price: M(p.price), bids: lotInfo.get(p.lotSeq)?.bids ?? 0,
+      photo: urlFor(p?.thumbKey) || urlFor(p?.photoKey) || null, lot: p.lotSeq, name: p.name, position: p.position, tier: p.tier || '', team: teamName.get(String(p.teamId)) || '', price: M(p.price), bids: lotInfo.get(p.lotSeq)?.bids ?? 0,
     }));
   }
   const title = REPORTS[kind];
@@ -994,7 +999,7 @@ router.get('/report/:kind', h(async (req, res) => {
   ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B0B0C' } };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  rows.forEach((r) => ws.addRow(r));
+  rows.forEach(({ photo, ...r }) => ws.addRow(r)); // eslint-disable-line no-unused-vars
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="fedcup-${kind}-${new Date().toISOString().slice(0, 10)}.xlsx"`);
   await wb.xlsx.write(res);

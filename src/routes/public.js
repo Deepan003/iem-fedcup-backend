@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { Media, Player, Team } from '../models.js';
+import {
+  AuditLog, Bid, Media, Player, Team,
+} from '../models.js';
 import { auctionService, fitOut } from '../auction/service.js';
 import { urlFor } from '../integrations/storage.js';
 import { getSettingsDoc } from '../settings.js';
@@ -91,6 +93,48 @@ router.get('/players', portalLimiter, portalGate, (req, res) => {
     .filter((p) => p.status !== 'withheld')
     .map((p) => ({ ...auctionService.publicPlayer(p), teamId: p.teamId, price: ['sold', 'retained'].includes(p.status) ? p.price : null })));
 });
+
+/**
+ * One player's auction story: every lot they went under the hammer in, with each bid
+ * (team, amount, time). Bids an admin took back (undo) are left out. Cached briefly so a
+ * player sharing their link with the whole class costs one database read, not hundreds.
+ */
+const storyCache = new Map(); // id -> { at, dataV, body }
+router.get('/players/:id/bids', portalLimiter, portalGate, h(async (req, res) => {
+  const e = auctionService.engine;
+  const p = e.players.get(String(req.params.id));
+  if (!p || p.status === 'withheld') return res.status(404).json({ error: 'NOT_FOUND' });
+  const dataV = e.state.version;
+  const hit = storyCache.get(p.id);
+  if (hit && hit.dataV === dataV && Date.now() - hit.at < 15000) return res.json(hit.body);
+
+  const [rows, undone] = await Promise.all([
+    Bid.find({ playerId: p.id }, {
+      lotSeq: 1, round: 1, teamId: 1, amount: 1, at: 1, _id: 0,
+    }).sort({ at: 1 }).limit(2000).lean(),
+    AuditLog.find({ type: 'bid_undone', 'data.removed': { $exists: true } }, { data: 1, _id: 0 }).lean(),
+  ]);
+  const gone = new Set(undone.map((u) => `${u.data.seq}|${u.data.removed.teamId}|${u.data.removed.amount}|${+new Date(u.data.removed.at)}`));
+  const byLot = new Map();
+  for (const r of rows) {
+    if (gone.has(`${r.lotSeq}|${r.teamId}|${r.amount}|${+new Date(r.at)}`)) continue;
+    const lot = byLot.get(r.lotSeq) || { seq: r.lotSeq, round: r.round, bids: [] };
+    lot.bids.push({ teamId: String(r.teamId), amount: r.amount, at: r.at });
+    byLot.set(r.lotSeq, lot);
+  }
+  const lots = [...byLot.values()].sort((a, b) => a.seq - b.seq).map((l) => ({
+    ...l, final: p.status === 'sold' && l.seq === p.lotSeq,
+  }));
+  const body = {
+    player: {
+      ...auctionService.publicPlayer(p), status: p.status, teamId: p.teamId, price: ['sold', 'retained'].includes(p.status) ? p.price : null,
+    },
+    lots,
+  };
+  storyCache.set(p.id, { at: Date.now(), dataV, body });
+  if (storyCache.size > 600) storyCache.delete(storyCache.keys().next().value);
+  return res.json(body);
+}));
 
 /* ------------------------- images stored in MongoDB ----------------------- */
 
