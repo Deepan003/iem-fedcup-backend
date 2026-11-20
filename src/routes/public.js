@@ -136,6 +136,27 @@ router.get('/players/:id/bids', portalLimiter, portalGate, h(async (req, res) =>
   return res.json(body);
 }));
 
+/**
+ * The player pool for the studio / anyone watching: every player and where they stand
+ * (still to come, sold + buyer + price, unsold). Not tied to the portal switch; the same facts are
+ * already public on the studio as the auction runs. Built from memory, cached briefly.
+ */
+let poolCache = { at: 0, v: -1, body: null };
+router.get('/pool', portalLimiter, (req, res) => {
+  const e = auctionService.engine;
+  const v = e.state.version;
+  if (!poolCache.body || poolCache.v !== v || Date.now() - poolCache.at > 10000) {
+    poolCache = {
+      at: Date.now(), v,
+      body: [...e.players.values()].filter((p) => p.status !== 'withheld').map((p) => ({
+        ...auctionService.publicPlayer(p), status: p.status, teamId: p.teamId, price: ['sold', 'retained'].includes(p.status) ? p.price : null,
+      })),
+    };
+  }
+  res.set('Cache-Control', 'public, max-age=5');
+  res.json(poolCache.body);
+});
+
 /* ------------------------- images stored in MongoDB ----------------------- */
 
 /*
