@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import {
-  AuditLog, Bid, Media, Player, Team,
+  AuditLog, Bid, Player, Team,
 } from '../models.js';
 import { auctionService, fitOut } from '../auction/service.js';
-import { urlFor } from '../integrations/storage.js';
+import { getObject, urlFor } from '../integrations/storage.js';
 import { getSettingsDoc } from '../settings.js';
 import { decrypt, safeEqual } from '../lib/crypto.js';
 import { ipKey } from '../lib/net.js';
@@ -156,10 +156,12 @@ async function loadMedia(key) {
     return hit;
   }
   if (mediaPending.has(key)) return mediaPending.get(key);
-  const p = Media.findById(key).lean().then((doc) => {
-    if (!doc) return null;
-    const body = doc.data?.buffer ? Buffer.from(doc.data.buffer) : Buffer.from(doc.data);
-    const entry = { type: doc.contentType, body };
+  // database images and R2 images alike (R2's public URL sends no CORS header, so canvas
+  // drawing — player cards, videos — loads R2 images through here instead)
+  const p = getObject(key).catch(() => null).then((obj) => {
+    if (!obj) return null;
+    const entry = { type: obj.type, body: obj.body };
+    const body = entry.body;
     mediaCache.set(key, entry);
     mediaCacheBytes += body.length;
     for (const [k, v] of mediaCache) {
@@ -174,7 +176,9 @@ async function loadMedia(key) {
 }
 
 router.get('/media/*', h(async (req, res) => {
-  const entry = await loadMedia(req.params[0]);
+  const key = String(req.params[0] || '');
+  if (!/^[\w\-./]+$/.test(key) || key.includes('..') || key.length > 300) return res.status(404).end();
+  const entry = await loadMedia(key);
   if (!entry) return res.status(404).end();
   res.set('Content-Type', entry.type);
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
