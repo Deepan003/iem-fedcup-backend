@@ -28,6 +28,7 @@ const ADMIN_ACTIONS = {
   }),
   undoLastSale: (e) => e.undoLastSale(),
   undoLastBid: (e) => e.undoLastBid(),
+  resetBids: (e) => e.resetBids(),
   startUnsoldRound: (e) => e.startUnsoldRound(),
 };
 

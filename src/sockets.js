@@ -31,6 +31,19 @@ export function createSocketServer(httpServer, service, corsOrigins) {
     }
   });
 
+  /*
+   * Captain presence: which teams have someone in the captain room right now, and the order in which
+   * teams first joined (this server session). Every screen gets 'presence'; a team's first arrival also
+   * sends 'captain:joined' so the studio / captain rooms can play the "joined" moment.
+   */
+  const joinedOrder = [];                         // team ids, first arrival first
+  const presence = () => {
+    const rooms = io.sockets.adapter.rooms;
+    const online = [...rooms.keys()].filter((r) => r.startsWith('team:') && rooms.get(r).size > 0).map((r) => r.slice(5));
+    return { online, joined: joinedOrder.slice() };
+  };
+  const sendPresence = () => io.emit('presence', presence());
+
   io.on('connection', (socket) => {
     const session = socket.data.session;
     const role = session?.role || 'public';
@@ -38,6 +51,17 @@ export function createSocketServer(httpServer, service, corsOrigins) {
     socket.join(role === 'admin' ? 'admin' : role === 'captain' ? `team:${session.teamId}` : 'public');
 
     socket.emit('state', service.stateFor(view));
+    socket.emit('presence', presence());
+    if (role === 'captain') {
+      const room = io.sockets.adapter.rooms.get(`team:${session.teamId}`);
+      if (room && room.size === 1) {                // this team's first open captain screen
+        const first = !joinedOrder.includes(session.teamId);
+        if (first) joinedOrder.push(session.teamId);
+        io.emit('captain:joined', { teamId: session.teamId, first, count: joinedOrder.length, at: Date.now() });
+      }
+      sendPresence();
+      socket.on('disconnect', () => setTimeout(sendPresence, 50));
+    }
 
     // Cheap per-socket throttles so one misbehaving client cannot make the server rebuild
     // the full state thousands of times a second.

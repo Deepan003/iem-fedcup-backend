@@ -337,3 +337,20 @@ test('captain on the team card takes a squad slot: 17 = captain + 2 retained + 1
   // a goalkeeper captain fills the goalkeeper minimum and counts toward the position
   assert.equal(make(true, 'Goalkeeper').finance('A').byPosition.Goalkeeper, 1);
 });
+
+test('reset bids: every bid wiped, back to base price, fresh timer, works from awaiting too', () => {
+  const { engine, clock } = setup({ requireConfirm: true });
+  const lot = openLot(engine, 'd1');
+  engine.bid({ teamId: 'A', amount: 50, lotSeq: lot.seq });
+  engine.bid({ teamId: 'B', amount: 55, lotSeq: lot.seq });
+  clock.advance(60000); engine.tick();                       // timer ran out -> awaiting confirmation
+  assert.equal(engine.state.lot.phase, 'awaiting');
+  const ev = engine.resetBids();
+  assert.equal(ev[0].type, 'bids_reset'); assert.equal(ev[0].removed.length, 2);
+  const l = engine.state.lot;
+  assert.equal(l.phase, 'bidding'); assert.equal(l.amount, null); assert.equal(l.leaderId, null); assert.equal(l.bidCount, 0);
+  assert.ok(l.endsAt > clock.now());
+  engine.bid({ teamId: 'B', amount: 50, lotSeq: l.seq });     // the next bid opens at the base price again
+  assert.equal(engine.state.lot.amount, 50);
+  assert.equal(code(() => { engine.resetBids(); engine.resetBids(); }), 'NOTHING_TO_UNDO');
+});

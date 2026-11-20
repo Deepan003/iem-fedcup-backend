@@ -496,6 +496,26 @@ export class AuctionEngine {
     return [{ type: 'bid_undone', seq: lot.seq, removed }];
   }
 
+  /**
+   * Admin: wipe every bid on the current lot — the player goes back to his base price with no leader,
+   * and bidding restarts with a fresh first-bid timer (also from "awaiting confirmation").
+   */
+  resetBids() {
+    const lot = this.state.lot;
+    if (!lot || !['bidding', 'awaiting'].includes(lot.phase)) fail('NO_ACTIVE_LOT');
+    if (!lot.bidCount && !lot.history.length) fail('NOTHING_TO_UNDO');
+    const removed = lot.history.slice();
+    lot.history = [];
+    lot.amount = null;
+    lot.leaderId = null;
+    lot.bidCount = 0;
+    lot.phase = 'bidding';
+    if (this.state.paused) lot.remainingMs = this.settings.timerEnabled ? this.settings.firstBidMs : null;
+    else lot.endsAt = this.settings.timerEnabled ? this.clock() + this.settings.firstBidMs : null;
+    this.#touch();
+    return [{ type: 'bids_reset', seq: lot.seq, removed }];
+  }
+
   /** Revert the most recent sale (player returns to the queue, money returns to the team). */
   undoLastSale() {
     if (this.#lotInProgress()) fail('LOT_IN_PROGRESS');

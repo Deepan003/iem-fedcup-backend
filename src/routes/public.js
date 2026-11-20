@@ -112,9 +112,9 @@ router.get('/players/:id/bids', portalLimiter, portalGate, h(async (req, res) =>
     Bid.find({ playerId: p.id }, {
       lotSeq: 1, round: 1, teamId: 1, amount: 1, at: 1, _id: 0,
     }).sort({ at: 1 }).limit(2000).lean(),
-    AuditLog.find({ type: 'bid_undone', 'data.removed': { $exists: true } }, { data: 1, _id: 0 }).lean(),
+    AuditLog.find({ type: { $in: ['bid_undone', 'bids_reset'] }, 'data.removed': { $exists: true } }, { type: 1, data: 1, _id: 0 }).lean(),
   ]);
-  const gone = new Set(undone.map((u) => `${u.data.seq}|${u.data.removed.teamId}|${u.data.removed.amount}|${+new Date(u.data.removed.at)}`));
+  const gone = new Set(undone.flatMap((u) => (Array.isArray(u.data.removed) ? u.data.removed : [u.data.removed]).map((r) => `${u.data.seq}|${r.teamId}|${r.amount}|${+new Date(r.at)}`)));
   const byLot = new Map();
   for (const r of rows) {
     if (gone.has(`${r.lotSeq}|${r.teamId}|${r.amount}|${+new Date(r.at)}`)) continue;
