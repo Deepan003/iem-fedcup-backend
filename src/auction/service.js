@@ -30,7 +30,9 @@ const ADMIN_ACTIONS = {
   undoLastBid: (e) => e.undoLastBid(),
   resetBids: (e) => e.resetBids(),
   startUnsoldRound: (e) => e.startUnsoldRound(),
+  assignPlayer: (e, a) => e.assignPlayer({ playerId: toIdSafe(a.playerId), teamId: toIdSafe(a.teamId), amount: Number(a.amount) }),
 };
+function toIdSafe(v) { return typeof v === 'string' || typeof v === 'number' ? String(v) : ''; }
 
 const toId = (v) => (v ? String(v) : null);
 const emptyBatch = () => ({

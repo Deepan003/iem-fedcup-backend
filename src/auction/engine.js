@@ -427,6 +427,35 @@ export class AuctionEngine {
     return [{ type: 'withdraw', seq, playerId }];
   }
 
+  /**
+   * After the auction (or between lots): the admin hands an unsold / not-yet-auctioned player straight to a
+   * team at an agreed price. Every buying rule still applies (purse, squad size, GK rule, position limits,
+   * base price). Works while live (no lot open) and after the auction has ended.
+   */
+  assignPlayer({ playerId, teamId, amount }) {
+    if (!['live', 'ended'].includes(this.state.status)) fail('NOT_LIVE');
+    if (this.#lotInProgress()) fail('LOT_IN_PROGRESS');
+    const player = this.players.get(playerId);
+    if (!player) fail('UNKNOWN_PLAYER');
+    if (!AUCTIONABLE.has(player.status)) fail('PLAYER_NOT_AVAILABLE');
+    if (!this.teams.has(teamId)) fail('UNKNOWN_TEAM');
+    if (!Number.isInteger(amount) || amount <= 0) fail('INVALID_AMOUNT');
+    const base = this.basePriceFor(player);
+    if (amount < base) fail('BELOW_BASE', { base });
+    const err = this.eligibility(teamId, player, amount);
+    if (err) fail(err, { maxBid: this.finance(teamId, player).maxBid });
+    const seq = ++this.state.lotCounter;
+    const now = this.clock();
+    this.state.lot = {
+      seq, playerId, base, amount, leaderId: teamId, bidCount: 1, phase: 'awaiting', endsAt: null, remainingMs: null, loadedAt: now,
+      history: [{ teamId, amount, at: now, source: 'assigned' }],
+    };
+    return [
+      { type: 'bid', seq, teamId, amount, at: now, source: 'assigned', playerId },
+      ...this.#closeSold('assigned'),
+    ];
+  }
+
   /** Manual mode: admin records the price agreed in the room. */
   manualSale({ teamId, amount, force = false }) {
     this.#requireLive();

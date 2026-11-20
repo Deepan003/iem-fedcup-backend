@@ -354,3 +354,24 @@ test('reset bids: every bid wiped, back to base price, fresh timer, works from a
   assert.equal(engine.state.lot.amount, 50);
   assert.equal(code(() => { engine.resetBids(); engine.resetBids(); }), 'NOTHING_TO_UNDO');
 });
+
+test('assign player: unsold → team at an agreed price after the auction ends, every rule still applies', () => {
+  const { engine } = setup();
+  engine.loadLot('d2');
+  engine.markUnsold();
+  engine.end();
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'd2', teamId: 'A', amount: 10 })), 'BELOW_BASE'); // Silver base 20
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'd2', teamId: 'A', amount: 500 })), 'OVER_BUDGET');
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'nope', teamId: 'A', amount: 20 })), 'UNKNOWN_PLAYER');
+  const ev = engine.assignPlayer({ playerId: 'd2', teamId: 'A', amount: 25 });
+  assert.deepEqual(ev.map((e) => e.type), ['bid', 'sold']);
+  const p = engine.players.get('d2');
+  assert.equal(p.status, 'sold');
+  assert.equal(p.teamId, 'A');
+  assert.equal(p.price, 25);
+  assert.equal(engine.state.recentSales[0].via, 'assigned');
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'd2', teamId: 'B', amount: 25 })), 'PLAYER_NOT_AVAILABLE');
+  // goalkeeper rule: A buys a keeper, then may not take a second one while B has none
+  engine.assignPlayer({ playerId: 'g1', teamId: 'A', amount: 10 });
+  assert.ok(['GK_RULE', 'POSITION_FULL'].includes(code(() => engine.assignPlayer({ playerId: 'g2', teamId: 'A', amount: 10 }))));
+});
