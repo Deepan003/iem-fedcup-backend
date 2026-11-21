@@ -196,12 +196,28 @@ async function loadMedia(key) {
   return p;
 }
 
-router.get('/media/*', h(async (req, res) => {
+// Only the folders the app writes to; unknown keys are remembered for a minute so a flood of made-up
+// keys can't turn every request into a storage / database read.
+const MEDIA_KEY = /^(db|players|teams|audio)\/[\w\-./]+$/;
+const mediaMiss = new Map(); // key -> time of the last miss
+const mediaLimiter = rateLimit({
+  windowMs: 60 * 1000, limit: 900, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: ipKey,
+});
+
+router.get('/media/*', mediaLimiter, h(async (req, res) => {
   const key = String(req.params[0] || '');
-  if (!/^[\w\-./]+$/.test(key) || key.includes('..') || key.length > 300) return res.status(404).end();
+  if (!MEDIA_KEY.test(key) || key.includes('..') || key.length > 300) return res.status(404).end();
+  const missAt = mediaMiss.get(key);
+  if (missAt && Date.now() - missAt < 60_000) return res.status(404).end();
   const entry = await loadMedia(key);
-  if (!entry) return res.status(404).end();
-  res.set('Content-Type', entry.type);
+  if (!entry) {
+    mediaMiss.set(key, Date.now());
+    if (mediaMiss.size > 5000) mediaMiss.delete(mediaMiss.keys().next().value);
+    return res.status(404).end();
+  }
+  mediaMiss.delete(key);
+  // only ever serve images / audio as themselves; anything else downloads as plain bytes
+  res.set('Content-Type', /^(image|audio)\/[\w.+-]+$/.test(entry.type || '') ? entry.type : 'application/octet-stream');
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
   return res.send(entry.body);
 }));
