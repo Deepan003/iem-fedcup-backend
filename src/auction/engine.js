@@ -439,9 +439,12 @@ export class AuctionEngine {
     if (!player) fail('UNKNOWN_PLAYER');
     if (!AUCTIONABLE.has(player.status)) fail('PLAYER_NOT_AVAILABLE');
     if (!this.teams.has(teamId)) fail('UNKNOWN_TEAM');
-    if (!Number.isInteger(amount) || amount <= 0) fail('INVALID_AMOUNT');
+    // Unsold players (and anyone left once the auction has ended) can be handed over FREE (amount 0) in the
+    // post-auction unsold allocation; otherwise the price must be at least the base price.
+    const freeOk = player.status === 'unsold' || this.state.status === 'ended';
+    if (!Number.isInteger(amount) || amount < 0 || (amount === 0 && !freeOk)) fail('INVALID_AMOUNT');
     const base = this.basePriceFor(player);
-    if (amount < base) fail('BELOW_BASE', { base });
+    if (amount > 0 && amount < base) fail('BELOW_BASE', { base });
     const err = this.eligibility(teamId, player, amount);
     if (err) fail(err, { maxBid: this.finance(teamId, player).maxBid });
     const seq = ++this.state.lotCounter;

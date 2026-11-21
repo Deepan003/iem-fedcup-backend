@@ -375,3 +375,21 @@ test('assign player: unsold → team at an agreed price after the auction ends, 
   engine.assignPlayer({ playerId: 'g1', teamId: 'A', amount: 10 });
   assert.ok(['GK_RULE', 'POSITION_FULL'].includes(code(() => engine.assignPlayer({ playerId: 'g2', teamId: 'A', amount: 10 }))));
 });
+
+test('assign player FREE: unsold players can be given away at 0, players still in the pool cannot (while live)', () => {
+  const { engine } = setup();
+  engine.loadLot('m1');
+  engine.markUnsold();
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'd1', teamId: 'B', amount: 0 })), 'INVALID_AMOUNT'); // d1 not auctioned yet
+  const ev = engine.assignPlayer({ playerId: 'm1', teamId: 'B', amount: 0 });
+  assert.deepEqual(ev.map((e) => e.type), ['bid', 'sold']);
+  const p = engine.players.get('m1');
+  assert.equal(p.status, 'sold');
+  assert.equal(p.teamId, 'B');
+  assert.equal(p.price, 0);
+  assert.equal(engine.finance('B').purse, 200); // nothing deducted
+  assert.equal(code(() => engine.assignPlayer({ playerId: 'd1', teamId: 'B', amount: -5 })), 'INVALID_AMOUNT');
+  engine.end();
+  engine.assignPlayer({ playerId: 'd1', teamId: 'B', amount: 0 }); // after the auction, anyone left is free too
+  assert.equal(engine.players.get('d1').price, 0);
+});
